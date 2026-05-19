@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OcuAI Terminal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  <style>
+    body { overflow-y: hidden; }
+    #hero { padding: 100px 8% 20px; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    .chat-wrapper { width: 100%; max-width: 900px; height: 80vh; display: flex; flex-direction: column; }
+    .chat-panel { height: 100%; display: flex; flex-direction: column; }
+    .chat-body { flex: 1; height: auto; }
+    
+    /* File upload styles */
+    .file-input-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 46px; height: 46px;
+      border-radius: 50%;
+      background: rgba(0,245,255,0.1);
+      border: 1px solid rgba(0,245,255,0.3);
+      color: var(--plasma);
+      cursor: pointer;
+      transition: all 0.3s;
+      flex-shrink: 0;
+    }
+    .file-input-wrapper:hover {
+      background: rgba(0,245,255,0.2);
+    }
+    .file-input-wrapper input[type=file] {
+      position: absolute;
+      width: 100%; height: 100%;
+      opacity: 0; cursor: pointer;
+    }
+    
+    #imagePreviewContainer {
+      display: none;
+      padding: 10px 20px;
+      border-top: 1px solid rgba(0,245,255,0.1);
+      background: rgba(0,31,92,0.3);
+    }
+    #imagePreview {
+      max-height: 80px;
+      border-radius: 8px;
+      border: 1px solid var(--plasma);
+    }
+    .msg-image {
+      max-width: 200px;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════ STAR FIELD CANVAS ═══ -->
+<canvas id="starfield"></canvas>
+
+<!-- ═══════════════════════════════════ FLOATING NAV ═══ -->
+<nav id="floatnav">
+  <div class="nav-inner">
+    <div class="nav-logo">
+      <div class="nav-eye-icon">
+        <div class="nav-iris"></div>
+        <div class="nav-pupil"></div>
+      </div>
+      <a href="/" style="text-decoration:none;"><span class="nav-brand">OCUCARE</span></a>
+    </div>
+    <div class="nav-links">
+      <a href="/#hero" class="nav-link">Home</a>
+      <a href="/#diseases" class="nav-link">Diseases</a>
+    </div>
+    <a href="/" class="nav-cta" style="text-decoration:none;">Exit Terminal</a>
+  </div>
+</nav>
+
+<section id="hero">
+  <div class="chat-wrapper">
+    <div class="chat-panel">
+      
+      <div class="chat-header">
+        <div class="chat-avatar">
+          <div class="avatar-eye">
+            <div class="avatar-iris"></div>
+            <div class="avatar-pupil"></div>
+          </div>
+          <div class="status-ring"></div>
+        </div>
+        <div class="chat-info">
+          <div class="chat-name">OcuAI Terminal</div>
+          <div class="chat-status">
+            <span class="status-dot"></span>
+            <span>Orbital Station Online</span>
+          </div>
+        </div>
+        <div class="chat-controls">
+          <div class="ctrl-dot red"></div>
+          <div class="ctrl-dot gold"></div>
+          <div class="ctrl-dot green"></div>
+        </div>
+      </div>
+      
+      <div class="chat-body" id="chatMessages">
+        <div class="chat-welcome">
+          <div class="welcome-icon">📡</div>
+          <p>OcuAI orbital intelligence online.</p>
+          <p style="margin-top:10px; font-size: 0.8rem;">You can upload an eye scan (image) or ask a question.</p>
+        </div>
+      </div>
+      
+      <div id="imagePreviewContainer">
+        <img id="imagePreview" src="" alt="Preview">
+      </div>
+
+      <div class="chat-footer">
+        <form id="chatForm">
+          <div class="file-input-wrapper" title="Upload Scan">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+            </svg>
+            <input type="file" id="imageInput" name="image" accept="image/*" />
+          </div>
+          
+          <input type="text" id="textInput" name="msg" placeholder="Transmit your query or caption..." autocomplete="off" />
+          
+          <button type="submit" id="sendBtn">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+          </button>
+        </form>
+      </div>
+      
+    </div>
+  </div>
+</section>
+
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+<script>
+// ── STARFIELD CANVAS (Same as chat.html) ───────────────────────────────────────
+const canvas = document.getElementById('starfield');
+const ctx = canvas.getContext('2d');
+let W, H, particles = [], mouse = { x: 0, y: 0 };
+function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+function createParticles() {
+  particles = [];
+  const configs = [
+    { count: 20, sizeMin: 2, sizeMax: 3, speedMin: 0.4, speedMax: 0.8, layer: 1 },
+    { count: 30, sizeMin: 1, sizeMax: 2, speedMin: 0.2, speedMax: 0.4, layer: 2 },
+    { count: 30, sizeMin: 0.5, sizeMax: 1, speedMin: 0.05,speedMax: 0.15, layer: 3 },
+  ];
+  configs.forEach(cfg => {
+    for (let i = 0; i < cfg.count; i++) {
+      const rand = Math.random();
+      const color = rand < 0.6 ? 'rgba(0,245,255,' : rand < 0.9 ? 'rgba(255,255,255,' : 'rgba(255,215,0,';
+      particles.push({
+        x: Math.random() * W, y: Math.random() * H,
+        vx: (Math.random() - 0.5) * cfg.speedMax + (Math.random() > 0.5 ? cfg.speedMin : -cfg.speedMin),
+        vy: (Math.random() - 0.5) * cfg.speedMax + (Math.random() > 0.5 ? cfg.speedMin : -cfg.speedMin),
+        size: cfg.sizeMin + Math.random() * (cfg.sizeMax - cfg.sizeMin), color: color,
+        alpha: 0.4 + Math.random() * 0.6, layer: cfg.layer,
+      });
+    }
+  });
+}
+function animateStars() {
+  ctx.clearRect(0, 0, W, H);
+  particles.forEach(p => {
+    const parallaxX = (mouse.x / W - 0.5) * (4 - p.layer) * -2;
+    const parallaxY = (mouse.y / H - 0.5) * (4 - p.layer) * -2;
+    p.x += p.vx; p.y += p.vy;
+    if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
+    if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
+    ctx.beginPath(); ctx.arc(p.x + parallaxX, p.y + parallaxY, p.size, 0, Math.PI * 2);
+    ctx.fillStyle = p.color + p.alpha + ')'; ctx.fill();
+  });
+  requestAnimationFrame(animateStars);
+}
+window.addEventListener('resize', () => { resize(); createParticles(); });
+document.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+resize(); createParticles(); animateStars();
+
+function formatTime() {
+  const d = new Date();
+  return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+}
+
+$(document).ready(function () {
+  let selectedFile = null;
+
+  // Handle Image Preview
+  $("#imageInput").on("change", function(e) {
+    const file = e.target.files[0];
+    if (file) {
+      selectedFile = file;
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        $("#imagePreview").attr("src", e.target.result);
+        $("#imagePreviewContainer").show();
+      }
+      reader.readAsDataURL(file);
+    } else {
+      selectedFile = null;
+      $("#imagePreviewContainer").hide();
+      $("#imagePreview").attr("src", "");
+    }
+  });
+
+  function scrollChat() {
+    $("#chatMessages")[0].scrollTop = $("#chatMessages")[0].scrollHeight;
+  }
+
+  // Handle Form Submit
+  $("#chatForm").on("submit", function (event) {
+    event.preventDefault();
+    
+    const rawText = $("#textInput").val().trim();
+    if (!rawText && !selectedFile) return; // Prevent empty submission
+
+    const time = formatTime();
+    
+    // Clear inputs immediately
+    $("#textInput").val("");
+    $("#imageInput").val("");
+    $("#imagePreviewContainer").hide();
+    
+    let userHtml = `<div class="msg-row user-row"><div class="msg-bubble user-bubble">`;
+    if (selectedFile) {
+      const src = $("#imagePreview").attr("src");
+      userHtml += `<img src="${src}" class="msg-image" />`;
+    }
+    if (rawText) {
+      userHtml += `<div class="msg-text">${rawText}</div>`;
+    }
+    userHtml += `<div class="msg-time">${time}</div></div><div class="msg-avatar user-avatar">YOU</div></div>`;
+    
+    $("#chatMessages").append(userHtml);
+    scrollChat();
+
+    // Show typing indicator
+    const typingHtml = `
+      <div class="msg-row bot-row" id="typing-indicator">
+        <div class="msg-avatar bot-avatar">AI</div>
+        <div class="msg-bubble bot-bubble typing">
+          <span></span><span></span><span></span>
+        </div>
+      </div>`;
+    $("#chatMessages").append(typingHtml);
+    scrollChat();
+
+    // Prepare FormData
+    const formData = new FormData();
+    if (rawText) formData.append("msg", rawText);
+    if (selectedFile) formData.append("image", selectedFile);
+
+    // Reset selectedFile reference
+    selectedFile = null;
+
+    $.ajax({
+      type: "POST",
+      url: "/get",
+      data: formData,
+      processData: false,
+      contentType: false,
+    }).done(function (data) {
+      $("#typing-indicator").remove();
+      const msgId = "bot_" + Date.now();
+      
+      // Parse markdown to HTML (basic implementation, or just use text if returned as text)
+      // Since backend returns plain text/markdown, we will insert it directly.
+      const botHtml = `
+        <div class="msg-row bot-row">
+          <div class="msg-avatar bot-avatar">AI</div>
+          <div class="msg-bubble bot-bubble">
+            <div class="msg-text" id="${msgId}" style="white-space: pre-line;"></div>
+            <div class="msg-time">${time} · OcuAI</div>
+          </div>
+        </div>`;
+      $("#chatMessages").append(botHtml);
+      const target = document.getElementById(msgId);
+      if (target) target.innerHTML = data; // use innerHTML if backend formats nicely, otherwise textContent
+      scrollChat();
+    }).fail(function() {
+      $("#typing-indicator").remove();
+      const errHtml = `
+        <div class="msg-row bot-row">
+          <div class="msg-avatar bot-avatar">AI</div>
+          <div class="msg-bubble bot-bubble error">
+            <div class="msg-text">⚠️ Signal lost. Unable to reach orbital station. Please retry your transmission.</div>
+          </div>
+        </div>`;
+      $("#chatMessages").append(errHtml);
+      scrollChat();
+    });
+  });
+});
+</script>
+</body>
+</html>

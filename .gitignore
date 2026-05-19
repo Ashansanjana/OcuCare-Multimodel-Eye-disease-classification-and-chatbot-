@@ -1,0 +1,45 @@
+# Environments
+.env
+.venv/
+env/
+venv/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.DS_Store
+
+# Data and Models
+data/
+uploads/
+Bert_Models/
+CNN_models/
+
+# Logs and Scratch scripts
+*.log
+error_log.txt
+filtered_log.txt
+small_log.txt
+test*.py
+check_model.py
+extract_log.py
+filter_log.py
+read_log.py
+store_index.py
