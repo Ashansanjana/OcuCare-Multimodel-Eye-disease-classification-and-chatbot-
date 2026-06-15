@@ -117,9 +117,21 @@ if retriever and chatModel:
             ("human", "{input}"),
         ])
 
+        # Chain to optimize search query (correct spelling/typos)
+        query_optimizer = (
+            ChatPromptTemplate.from_messages([
+                ("system", "You are an expert query optimizer for an ophthalmology search database. "
+                           "Your task is to take the user's input, correct any spelling errors or typos (e.g. 'glucoma' -> 'glaucoma', 'symptomps' -> 'symptoms'), "
+                           "and output ONLY the corrected search query. Do not add any extra text or explanation."),
+                ("human", "{input}")
+            ])
+            | chatModel
+            | StrOutputParser()
+        )
+
         rag_chain = (
             {
-                "context": retriever | format_docs,
+                "context": query_optimizer | retriever | format_docs,
                 "input": RunnablePassthrough()
             }
             | prompt
@@ -132,6 +144,114 @@ if retriever and chatModel:
         traceback.print_exc()
 else:
     print("[SKIP] RAG chain skipped (missing retriever or chat model).")
+
+# ── Direct Gemini Fallback Chain (no Pinecone — used when KB is offline) ─────
+# Answers using Gemini alone when the network/Pinecone is unreachable.
+direct_chain = None
+if chatModel:
+    try:
+        from langchain_core.prompts import ChatPromptTemplate
+        from langchain_core.output_parsers import StrOutputParser
+        from src.prompt import offline_system_prompt
+        
+        _direct_prompt = ChatPromptTemplate.from_messages([
+            ("system", offline_system_prompt),
+            ("human", "{input}"),
+        ])
+        direct_chain = (
+            _direct_prompt
+            | chatModel
+            | StrOutputParser()
+        )
+        print("[OK] Direct Gemini fallback chain ready.")
+    except Exception as e:
+        print(f"[WARN] Direct chain setup failed: {e}")
+else:
+    print("[SKIP] Direct chain skipped (no chat model).")
+
+# ── Diagnosis Explanation Chain (CNN/Fusion model output → Gemini) ─────────────
+diagnosis_chain = None
+if chatModel:
+    try:
+        from langchain_core.prompts import ChatPromptTemplate
+        from langchain_core.output_parsers import StrOutputParser
+        from src.prompt import diagnosis_system_prompt
+
+        _diag_prompt_template = ChatPromptTemplate.from_messages([
+            ("system", diagnosis_system_prompt),
+            ("human", "Please generate the full OcuAI Diagnostic Report for this patient now."),
+        ])
+        diagnosis_chain = _diag_prompt_template | chatModel | StrOutputParser()
+        print("[OK] Diagnosis explanation chain ready.")
+    except Exception as e:
+        print(f"[WARN] Diagnosis chain setup failed: {e}")
+        traceback.print_exc()
+else:
+    print("[SKIP] Diagnosis chain skipped (no chat model).")
+
+
+def _explain_diagnosis(diagnosis: str, confidence: float, model_type: str,
+                       patient_symptoms: str = "") -> str:
+    """
+    Takes raw model prediction and generates a doctor-formatted, explainable
+    report by:
+      1. Retrieving relevant disease context from the Pinecone knowledge base.
+      2. Invoking Gemini (diagnosis_chain) with the structured diagnosis prompt.
+    Falls back to a simple text summary if the chain is unavailable.
+    """
+    # ── Fallback if LLM chain is not ready ───────────────────────────────────
+    if not diagnosis_chain:
+        lines = [
+            f"**Diagnosis:** {diagnosis}",
+            f"**Confidence:** {confidence:.2%}",
+            f"\n*Analyzed via {model_type}.*",
+        ]
+        if patient_symptoms:
+            lines.insert(2, f"**Reported Symptoms:** {patient_symptoms}")
+        return "\n".join(lines)
+
+    try:
+        # ── Step 1: Retrieve KB context for the predicted disease ─────────────
+        context = ""
+        if retriever:
+            query = f"{diagnosis} eye disease symptoms causes treatment ophthalmology"
+            try:
+                docs = retriever.invoke(query)
+                context = "\n\n".join(doc.page_content for doc in docs)
+                print(f"[Diagnosis] Retrieved {len(docs)} KB docs for '{diagnosis}'.")
+            except Exception as re:
+                print(f"[Diagnosis] KB retrieval failed: {re}")
+                context = "Knowledge base context unavailable."
+        else:
+            context = "Knowledge base not connected."
+
+        # ── Step 2: Build the symptoms section ────────────────────────────────
+        symptoms_section = ""
+        if patient_symptoms:
+            symptoms_section = f"  Patient Reported Symptoms: {patient_symptoms}\n"
+
+        # ── Step 3: Invoke Gemini with the diagnosis prompt ───────────────────
+        print(f"[Diagnosis] Generating Gemini report for '{diagnosis}' ({confidence:.2%})...")
+        response = diagnosis_chain.invoke({
+            "diagnosis": diagnosis,
+            "confidence": f"{confidence:.1%}",
+            "model_type": model_type,
+            "symptoms_section": symptoms_section,
+            "context": context,
+        })
+        print(f"[Diagnosis] Report generated ({len(response)} chars).")
+        return response
+
+    except Exception as e:
+        traceback.print_exc()
+        err = str(e)[:150]
+        return (
+            f"**Diagnosis:** {diagnosis}\n"
+            f"**Confidence:** {confidence:.2%}\n\n"
+            f"*Analyzed via {model_type}.*\n\n"
+            f"⚠️ Detailed explanation unavailable: {err}"
+        )
+
 
 print("\n[READY] Flask server initializing...\n")
 
@@ -168,29 +288,36 @@ def chat():
         image_file.save(filepath)
 
         if msg:
-            # Image + Text → Fusion
+            # Image + Text → Fusion → Gemini doctor report
             try:
                 res = predict_fusion(filepath, msg)
-                return (
-                    f"**Diagnosis:** {res['diagnosis']}\n"
-                    f"**Confidence:** {res['confidence']:.2%}\n\n"
-                    f"*Analyzed via Multi-Modal Fusion Model.*"
+                if res['diagnosis'].startswith("Fusion Error"):
+                    return f"⚠️ Fusion inference error: {res['diagnosis']}"
+                return _explain_diagnosis(
+                    diagnosis=res['diagnosis'],
+                    confidence=res['confidence'],
+                    model_type="Multi-Modal Fusion (InceptionV3 + BERT)",
+                    patient_symptoms=msg,
                 )
             except Exception as e:
-                return f"Fusion inference error: {str(e)}"
+                traceback.print_exc()
+                return f"⚠️ Fusion inference error: {str(e)}"
         else:
-            # Image only → CNN
+            # Image only → CNN → Gemini doctor report
             try:
                 res = predict_cnn(filepath)
-                return (
-                    f"**Diagnosis:** {res['diagnosis']}\n"
-                    f"**Confidence:** {res['confidence']:.2%}\n\n"
-                    f"*Analyzed via Vision CNN Model.*"
+                if res['diagnosis'].startswith("CNN Error"):
+                    return f"⚠️ CNN inference error: {res['diagnosis']}"
+                return _explain_diagnosis(
+                    diagnosis=res['diagnosis'],
+                    confidence=res['confidence'],
+                    model_type="Vision CNN (Keras/TensorFlow)",
                 )
             except Exception as e:
-                return f"CNN inference error: {str(e)}"
+                traceback.print_exc()
+                return f"⚠️ CNN inference error: {str(e)}"
 
-    # ── Text-only path → RAG ──────────────────────────────────────────────
+    # ── Text-only path → RAG (with Gemini direct fallback) ──────────────
     if msg:
         if rag_chain:
             try:
@@ -198,15 +325,39 @@ def chat():
                 print(f"[RAG] Querying: {safe_msg}")
                 response = rag_chain.invoke(msg)
                 safe_resp = response[:100].encode('ascii', errors='replace').decode()
-                print(f"[RAG] Response: {safe_resp}...")
+                print(f"[RAG] Response (KB): {safe_resp}...")
                 return str(response)
+            except Exception as rag_err:
+                # Pinecone / network failure — fall back to direct Gemini
+                err_str = str(rag_err)
+                is_network_err = any(k in err_str for k in (
+                    "getaddrinfo", "MaxRetry", "NameResolution",
+                    "ConnectionError", "Timeout", "ConnectTimeout"
+                ))
+                if is_network_err and direct_chain:
+                    print(f"[RAG] Pinecone unreachable, falling back to direct Gemini...")
+                    try:
+                        response = direct_chain.invoke(msg)
+                        print(f"[RAG] Response (direct Gemini): {response[:80].encode('ascii', errors='replace').decode()}...")
+                        return str(response) + "\n\n---\n⚠️ *OcuCare Knowledge Base is temporarily offline. This response is from OcuAI general knowledge only.*"
+                    except Exception as direct_err:
+                        print(f"[Direct Gemini ERROR] {direct_err}")
+                        return "Sorry, I could not reach OcuAI at this time. Please check your internet connection."
+                else:
+                    import io
+                    buf = io.StringIO()
+                    traceback.print_exc(file=buf)
+                    print(f"[RAG ERROR] {buf.getvalue().encode('ascii', errors='replace').decode()}")
+                    return f"Sorry, I encountered an error. Please try again."
+
+        elif direct_chain:
+            # rag_chain never built (no Pinecone) — use Gemini directly
+            print(f"[Direct] No RAG chain, using direct Gemini for: {msg[:60]}")
+            try:
+                response = direct_chain.invoke(msg)
+                return str(response) + "\n\n---\n⚠️ *OcuCare Knowledge Base not connected. Response from OcuAI general knowledge.*"
             except Exception as e:
-                import io
-                buf = io.StringIO()
-                traceback.print_exc(file=buf)
-                tb_str = buf.getvalue().encode('ascii', errors='replace').decode()
-                print(f"[RAG ERROR] {tb_str}")
-                return f"Sorry, I encountered an error. Please try again."
+                return f"Sorry, OcuAI is unavailable: {str(e)[:100]}"
         else:
             return "The AI assistant is not available right now. Please check server logs."
 

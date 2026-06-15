@@ -167,16 +167,22 @@ def _extract_inception_feature(img_path: str):
 # 
 # Public API
 # 
-# ── EXACT PREPROCESSING PIPELINE ──────────────────────────────────────────────
+# ── PREPROCESSING PIPELINE ─────────────────────────────────────────────────────
+# IMPORTANT: The model has InceptionV3's preprocess_input built in as an
+# internal layer (added during training via: x = preprocess_input(x)).
+# It expects RAW [0, 255] pixel values — do NOT divide by 255 here.
+# Dividing by 255 before sending to the model compresses all images to [0, 1],
+# which after the model's internal preprocess_input (which does x/127.5 - 1)
+# maps everything to ≈ -1.0 regardless of image content → all same prediction.
 def preprocess_image(image_file):
     from PIL import Image
     import numpy as np
-    
+
     img = Image.open(image_file).convert('RGB')
     img = img.resize((256, 256))
-    img_array = np.array(img, dtype=np.float32)          # shape: (256, 256, 3)
-    img_array = np.expand_dims(img_array, axis=0)        # shape: (1, 256, 256, 3)
-    img_array = img_array / 255.0                        # scale to [0, 1]
+    img_array = np.array(img, dtype=np.float32)   # shape: (1, 256, 256, 3), range [0, 255]
+    img_array = np.expand_dims(img_array, axis=0) # add batch dimension
+    # Do NOT normalize — the model's internal preprocess_input layer handles it
     return img_array
 
 # ── EXACT PREDICTION PIPELINE ────────────────────────────────────────────────
