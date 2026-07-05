@@ -77,6 +77,34 @@ except Exception as e:
     def predict_fusion(img_path, txt):
         return {"diagnosis": "Fusion model unavailable", "confidence": 0.0}
 
+try:
+    from src.web_tool import (
+        format_web_evidence_for_prompt,
+        format_web_evidence_for_response,
+        is_web_evidence_configured,
+        search_trusted_web,
+        should_use_web_tool,
+    )
+    print("[OK] Trusted web evidence tool loaded.")
+except Exception as e:
+    print(f"[WARN] Trusted web evidence tool unavailable: {e}")
+    traceback.print_exc()
+
+    def is_web_evidence_configured():
+        return False
+
+    def should_use_web_tool(query):
+        return False
+
+    def search_trusted_web(query, max_results=3):
+        return []
+
+    def format_web_evidence_for_prompt(results):
+        return ""
+
+    def format_web_evidence_for_response(results):
+        return ""
+
 # ── Pinecone Vector Store ─────────────────────────────────────────────────────
 retriever = None
 if embeddings and PINECONE_API_KEY:
@@ -376,6 +404,38 @@ def _format_docs_for_prompt(docs) -> str:
     return "\n\n".join(blocks) if blocks else "No relevant OcuCare knowledge-base context was retrieved."
 
 
+def _retrieve_trusted_web_evidence(user_message: str) -> list:
+    if not should_use_web_tool(user_message):
+        return []
+    try:
+        results = search_trusted_web(user_message)
+        print(f"[WebEvidence] Retrieved {len(results)} trusted web results.")
+        return results
+    except Exception as e:
+        print(f"[WebEvidence] Tool failed closed: {e}")
+        return []
+
+
+def _combine_prompt_context(docs, web_results: list) -> str:
+    parts = [_format_docs_for_prompt(docs)]
+    web_context = format_web_evidence_for_prompt(web_results)
+    if web_context:
+        parts.append(web_context)
+    return "\n\n---\n\n".join(parts)
+
+
+def _build_web_augmented_input(user_message: str, web_results: list) -> str:
+    web_context = format_web_evidence_for_prompt(web_results)
+    if not web_context:
+        return user_message
+    return (
+        f"{user_message}\n\n"
+        "---\n"
+        f"{web_context}\n\n"
+        "Use the Trusted Web Evidence only if relevant. Cite it with [W1], [W2], etc."
+    )
+
+
 def _retrieve_evidence_for_query(user_message: str):
     if not retriever:
         return []
@@ -537,6 +597,7 @@ def health():
         "retriever": retriever is not None,
         "chatModel": chatModel is not None,
         "rag_chain": rag_chain is not None,
+        "trusted_web_evidence": is_web_evidence_configured(),
     }
 
 
@@ -721,13 +782,19 @@ def chat():
                 safe_msg = msg.encode('ascii', errors='replace').decode()
                 print(f"[RAG] Querying: {safe_msg}")
                 docs = _retrieve_evidence_for_query(msg)
+                web_results = _retrieve_trusted_web_evidence(msg)
                 response = rag_chain.invoke({
                     "input": msg,
-                    "context": _format_docs_for_prompt(docs),
+                    "context": _combine_prompt_context(docs, web_results),
                 })
                 safe_resp = response[:100].encode('ascii', errors='replace').decode()
                 print(f"[RAG] Response (KB): {safe_resp}...")
-                return _triage_prefix(msg) + str(response) + _format_retrieved_evidence(docs)
+                return (
+                    _triage_prefix(msg)
+                    + str(response)
+                    + _format_retrieved_evidence(docs)
+                    + format_web_evidence_for_response(web_results)
+                )
             except Exception as rag_err:
                 # Pinecone / network failure — fall back to direct Gemini
                 err_str = str(rag_err)
@@ -738,9 +805,15 @@ def chat():
                 if is_network_err and direct_chain:
                     print(f"[RAG] Pinecone unreachable, falling back to direct Gemini...")
                     try:
-                        response = direct_chain.invoke(msg)
+                        web_results = _retrieve_trusted_web_evidence(msg)
+                        response = direct_chain.invoke(_build_web_augmented_input(msg, web_results))
                         print(f"[RAG] Response (direct Gemini): {response[:80].encode('ascii', errors='replace').decode()}...")
-                        return _triage_prefix(msg) + str(response) + "\n\n---\n⚠️ *OcuCare Knowledge Base is temporarily offline. This response is from OcuAI general knowledge only. Citations are unavailable.*"
+                        return (
+                            _triage_prefix(msg)
+                            + str(response)
+                            + format_web_evidence_for_response(web_results)
+                            + "\n\n---\nOcuCare Knowledge Base is temporarily offline. Trusted web evidence is shown above when available; otherwise this response uses OcuAI general knowledge only."
+                        )
                     except Exception as direct_err:
                         print(f"[Direct Gemini ERROR] {direct_err}")
                         return "Sorry, I could not reach OcuAI at this time. Please check your internet connection."
@@ -755,8 +828,14 @@ def chat():
             # rag_chain never built (no Pinecone) — use Gemini directly
             print(f"[Direct] No RAG chain, using direct Gemini for: {msg[:60]}")
             try:
-                response = direct_chain.invoke(msg)
-                return _triage_prefix(msg) + str(response) + "\n\n---\n⚠️ *OcuCare Knowledge Base not connected. Response from OcuAI general knowledge. Citations are unavailable.*"
+                web_results = _retrieve_trusted_web_evidence(msg)
+                response = direct_chain.invoke(_build_web_augmented_input(msg, web_results))
+                return (
+                    _triage_prefix(msg)
+                    + str(response)
+                    + format_web_evidence_for_response(web_results)
+                    + "\n\n---\nOcuCare Knowledge Base not connected. Trusted web evidence is shown above when available; otherwise this response uses OcuAI general knowledge only."
+                )
             except Exception as e:
                 return f"Sorry, OcuAI is unavailable: {str(e)[:100]}"
         else:

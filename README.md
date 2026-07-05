@@ -5,6 +5,7 @@ OcuCare is a premium, state-of-the-art multimodal artificial intelligence platfo
 1. **RAG-Powered Chatbot (OcuAI)**: Retrieves knowledge from curated ophthalmology PDFs to answer text questions using a Retrieval-Augmented Generation (RAG) framework with Pinecone and Google's Gemini LLM.
 2. **Vision CNN Diagnosis**: Leverages a deep CNN model to analyze fundus eye images directly and classify them into four categories: Cataract, Diabetic Retinopathy, Glaucoma, or Normal.
 3. **Multimodal Fusion Classifier**: Fuses fundus images and textual symptom descriptions using a deep learning pipeline (combining InceptionV3 and BERT embeddings) to perform joint inference.
+4. **Hidden Trusted Web Evidence Tool**: Optionally augments text answers with current evidence from allowlisted medical websites without exposing a separate UI tool. See `WEB_EVIDENCE_TOOL.md`.
 
 ---
 

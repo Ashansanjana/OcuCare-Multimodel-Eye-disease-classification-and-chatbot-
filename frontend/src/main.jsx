@@ -39,7 +39,7 @@ const quickPrompts = [
 
 const welcomeMessage = {
   role: "assistant",
-  text: "Ask about eye symptoms, conditions, or care. You may upload an eye image for screening support. This tool is informational and cannot confirm a diagnosis.",
+  text: "Ask about eye symptoms, conditions, or care. You may upload scanned eye image for screening support. This tool is informational and cannot confirm a diagnosis.",
   time: "OcuCare Assistant",
 };
 
