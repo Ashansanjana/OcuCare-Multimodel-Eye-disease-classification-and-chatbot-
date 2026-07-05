@@ -48,3 +48,5 @@ read_log.py
 store_index.py
 
 calude.py
+
+frontend/.env

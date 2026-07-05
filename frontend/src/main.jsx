@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import "./styles.css";
 import heroImage from "./assets/ophthalmology-hero.png";
+import { isSupabaseConfigured, supabase } from "./lib/supabaseClient";
 
 const urgentText =
   "Seek immediate care for sudden vision loss, severe pain, injury, chemical exposure, flashes, floaters, or a curtain over vision.";
@@ -35,6 +36,12 @@ const quickPrompts = [
   "Explain glaucoma symptoms in simple language.",
   "When should floaters be treated as urgent?",
 ];
+
+const welcomeMessage = {
+  role: "assistant",
+  text: "Ask about eye symptoms, conditions, or care. You may upload an eye image for screening support. This tool is informational and cannot confirm a diagnosis.",
+  time: "OcuCare Assistant",
+};
 
 function cn(...inputs) {
   return twMerge(clsx(inputs));
@@ -377,19 +384,20 @@ function Info({ title, text }) {
 }
 
 function AssistantPage() {
-  const [messages, setMessages] = useState([
-    {
-      role: "assistant",
-      text: "Ask about eye symptoms, conditions, or care. You may upload an eye image for screening support. This tool is informational and cannot confirm a diagnosis.",
-      time: "OcuCare Assistant",
-    },
-  ]);
+  const [messages, setMessages] = useState([welcomeMessage]);
   const [text, setText] = useState("");
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState("");
   const [busy, setBusy] = useState(false);
+  const [authSession, setAuthSession] = useState(null);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authNotice, setAuthNotice] = useState("");
+  const [chatSessions, setChatSessions] = useState([]);
+  const [activeSessionId, setActiveSessionId] = useState(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const fileInputRef = useRef(null);
   const activeMode = file && text.trim() ? "Image + symptoms" : file ? "Image-only" : "Text-only";
+  const user = authSession?.user || null;
 
   const workflowList = useMemo(
     () => ["Source-grounded education", "Class-limited image screening", "Image-text contradiction check", "Urgent symptom escalation"],
@@ -400,6 +408,140 @@ function AssistantPage() {
     setFile(null);
     setPreview("");
     if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+
+    supabase.auth.getSession().then(({ data }) => {
+      setAuthSession(data.session || null);
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthSession(session || null);
+      if (!session) {
+        setChatSessions([]);
+        setActiveSessionId(null);
+        setMessages([welcomeMessage]);
+      }
+    });
+
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    loadChatSessions();
+  }, [user?.id]);
+
+  async function signIn(event) {
+    event.preventDefault();
+    if (!isSupabaseConfigured || !authEmail.trim()) return;
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email: authEmail.trim(),
+      options: {
+        emailRedirectTo: window.location.origin + "/bot",
+      },
+    });
+
+    setAuthNotice(error ? error.message : "Check your email for the login link.");
+  }
+
+  async function signOut() {
+    if (!isSupabaseConfigured) return;
+    await supabase.auth.signOut();
+    setAuthNotice("");
+  }
+
+  async function loadChatSessions() {
+    if (!user) return;
+    setHistoryLoading(true);
+    const { data, error } = await supabase
+      .from("chat_sessions")
+      .select("id,title,mode,created_at,updated_at")
+      .order("updated_at", { ascending: false });
+    if (!error) setChatSessions(data || []);
+    setHistoryLoading(false);
+  }
+
+  async function ensureChatSession(firstText = "") {
+    if (!user) return null;
+    if (activeSessionId) return activeSessionId;
+
+    const title = titleFromMessage(firstText);
+    const { data, error } = await supabase
+      .from("chat_sessions")
+      .insert({
+        user_id: user.id,
+        title,
+        mode: activeMode.toLowerCase(),
+      })
+      .select("id,title,mode,created_at,updated_at")
+      .single();
+
+    if (error) {
+      setAuthNotice(error.message);
+      return null;
+    }
+
+    setActiveSessionId(data.id);
+    setChatSessions(prev => [data, ...prev]);
+    return data.id;
+  }
+
+  async function saveChatMessage(sessionId, message) {
+    if (!user || !sessionId) return;
+    await supabase.from("chat_messages").insert({
+      session_id: sessionId,
+      user_id: user.id,
+      role: message.role,
+      content: message.text || "",
+      image_name: message.imageName || null,
+      image_present: Boolean(message.image),
+      metadata: {
+        client_time: message.time,
+        mode: activeMode,
+      },
+    });
+    await supabase
+      .from("chat_sessions")
+      .update({ mode: activeMode.toLowerCase() })
+      .eq("id", sessionId);
+    loadChatSessions();
+  }
+
+  async function loadSessionMessages(sessionId) {
+    if (!user) return;
+    setHistoryLoading(true);
+    const { data, error } = await supabase
+      .from("chat_messages")
+      .select("role,content,image_name,image_present,created_at,metadata")
+      .eq("session_id", sessionId)
+      .order("created_at", { ascending: true });
+
+    if (!error) {
+      setActiveSessionId(sessionId);
+      setMessages([
+        welcomeMessage,
+        ...(data || []).map(row => ({
+          role: row.role,
+          text: row.content,
+          time: row.metadata?.client_time || formatStoredTime(row.created_at),
+          image: "",
+          imageName: row.image_name,
+          image_present: row.image_present,
+        })),
+      ]);
+    }
+    setHistoryLoading(false);
+  }
+
+  function startNewChat() {
+    setActiveSessionId(null);
+    setMessages([welcomeMessage]);
+    resetFile();
+    setText("");
   }
 
   function onFileChange(event) {
@@ -420,7 +562,17 @@ function AssistantPage() {
     if (cleanText) formData.append("msg", cleanText);
     if (file) formData.append("image", file);
 
-    setMessages(prev => [...prev, { role: "user", text: cleanText, image: preview, time: formatTime() }]);
+    const sessionId = user ? await ensureChatSession(cleanText || "Image screening chat") : null;
+    const userMessage = {
+      role: "user",
+      text: cleanText,
+      image: preview,
+      imageName: file?.name || null,
+      time: formatTime(),
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+    saveChatMessage(sessionId, userMessage);
     setText("");
     resetFile();
     setBusy(true);
@@ -429,9 +581,13 @@ function AssistantPage() {
       const response = await fetch("/get", { method: "POST", body: formData });
       if (!response.ok) throw new Error("Request failed");
       const data = await response.text();
-      setMessages(prev => [...prev, { role: "assistant", text: data, time: `${formatTime()} - OcuCare` }]);
+      const assistantMessage = { role: "assistant", text: data, time: `${formatTime()} - OcuCare` };
+      setMessages(prev => [...prev, assistantMessage]);
+      saveChatMessage(sessionId, assistantMessage);
     } catch {
-      setMessages(prev => [...prev, { role: "assistant", text: "We could not process your request. Please try again.", time: formatTime(), error: true }]);
+      const errorMessage = { role: "assistant", text: "We could not process your request. Please try again.", time: formatTime(), error: true };
+      setMessages(prev => [...prev, errorMessage]);
+      saveChatMessage(sessionId, errorMessage);
     } finally {
       setBusy(false);
     }
@@ -514,6 +670,42 @@ function AssistantPage() {
         </section>
 
         <aside className="space-y-4 overflow-y-auto">
+          <AuthPanel
+            user={user}
+            authEmail={authEmail}
+            setAuthEmail={setAuthEmail}
+            authNotice={authNotice}
+            signIn={signIn}
+            signOut={signOut}
+          />
+          {user && (
+            <Card className="p-5">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-lg font-black text-slate-950">Previous chats</h2>
+                <button className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-black text-blue-800 hover:bg-blue-50" type="button" onClick={startNewChat}>
+                  New
+                </button>
+              </div>
+              <div className="mt-4 space-y-2">
+                {historyLoading && <p className="text-sm text-slate-500">Loading history...</p>}
+                {!historyLoading && chatSessions.length === 0 && <p className="text-sm text-slate-500">No saved chats yet.</p>}
+                {chatSessions.map(session => (
+                  <button
+                    className={cn(
+                      "w-full rounded-2xl border p-3 text-left transition hover:border-blue-300 hover:bg-blue-50",
+                      activeSessionId === session.id ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-white"
+                    )}
+                    key={session.id}
+                    type="button"
+                    onClick={() => loadSessionMessages(session.id)}
+                  >
+                    <strong className="block truncate text-sm text-slate-950">{session.title}</strong>
+                    <span className="text-xs text-slate-500">{formatStoredTime(session.updated_at)}</span>
+                  </button>
+                ))}
+              </div>
+            </Card>
+          )}
           <Card className="p-5">
             <h2 className="text-lg font-black text-slate-950">Suggested prompts</h2>
             <div className="mt-4 space-y-2">
@@ -537,6 +729,51 @@ function AssistantPage() {
         </aside>
       </main>
     </div>
+  );
+}
+
+function AuthPanel({ user, authEmail, setAuthEmail, authNotice, signIn, signOut }) {
+  if (!isSupabaseConfigured) {
+    return (
+      <Card className="border-amber-200 bg-amber-50 p-5">
+        <h2 className="text-lg font-black text-amber-950">Login disabled</h2>
+        <p className="mt-2 text-sm leading-6 text-amber-900">Add Supabase environment variables and rebuild to enable saved chat history.</p>
+      </Card>
+    );
+  }
+
+  if (user) {
+    return (
+      <Card className="p-5">
+        <Badge tone="teal">Signed in</Badge>
+        <h2 className="mt-3 text-lg font-black text-slate-950">Chat history enabled</h2>
+        <p className="mt-2 break-all text-sm text-slate-600">{user.email}</p>
+        <button className="mt-4 min-h-10 rounded-xl border border-slate-200 px-4 text-sm font-black text-slate-700 hover:bg-slate-50" type="button" onClick={signOut}>
+          Sign out
+        </button>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="p-5">
+      <Badge tone="blue">Optional login</Badge>
+      <h2 className="mt-3 text-lg font-black text-slate-950">Save previous chats</h2>
+      <p className="mt-2 text-sm leading-6 text-slate-600">Continue anonymously, or sign in by email to save and reload chat sessions.</p>
+      <form className="mt-4 space-y-3" onSubmit={signIn}>
+        <input
+          className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+          type="email"
+          value={authEmail}
+          onChange={event => setAuthEmail(event.target.value)}
+          placeholder="you@example.com"
+        />
+        <button className="min-h-11 w-full rounded-xl bg-slate-950 px-4 text-sm font-black text-white hover:bg-slate-800" type="submit">
+          Send login link
+        </button>
+      </form>
+      {authNotice && <p className="mt-3 text-sm text-slate-600">{authNotice}</p>}
+    </Card>
   );
 }
 
@@ -683,6 +920,18 @@ function displayTitle(title) {
 function formatTime() {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+function titleFromMessage(value) {
+  const clean = String(value || "Eye image screening").replace(/\s+/g, " ").trim();
+  return clean.length > 44 ? `${clean.slice(0, 44)}...` : clean;
+}
+
+function formatStoredTime(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 function App() {
