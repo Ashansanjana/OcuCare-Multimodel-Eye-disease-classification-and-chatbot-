@@ -1,0 +1,6 @@
+case_id,image_path,expected_scope,notes
+IMG001,data/uploads/0_4015166.jpg,supported_sample,Existing upload sample for image-only screening.
+IMG002,data/uploads/1_4540560.jpg,supported_sample,Existing upload sample for image-only screening.
+IMG003,data/uploads/2_5194189.jpg,supported_sample,Existing upload sample for image-only screening.
+IMG004,data/uploads/100_left.jpeg,supported_sample,Existing upload sample for image-only screening.
+IMG005,data/uploads/upload_test.jpg,quality_or_uncertain,Tiny upload should be checked for uncertainty/quality concerns.

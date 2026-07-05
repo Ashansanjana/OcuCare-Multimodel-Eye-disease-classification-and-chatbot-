@@ -3,341 +3,196 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OcuCare — Eye Health Intelligence System</title>
-  <meta name="description" content="OcuAI: Advanced eye disease intelligence powered by deep space-grade AI. Get instant, precise answers about eye conditions." />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+  <title>OcuCare | Eye Health Decision Support</title>
+  <meta name="description" content="OcuCare is a research prototype for source-grounded eye-health guidance, fundus image screening, and multimodal safety checks." />
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
 </head>
 <body>
+  <header class="site-header">
+    <a class="brand" href="#home" aria-label="OcuCare home">
+      <span class="brand-mark">OC</span>
+      <span>
+        <strong>OcuCare</strong>
+        <small>Ophthalmology support research</small>
+      </span>
+    </a>
+    <nav class="site-nav" aria-label="Primary navigation">
+      <a href="#workflow">Workflow</a>
+      <a href="#evaluation">Evaluation</a>
+      <a href="#resources">Resources</a>
+      <a href="#updates">Updates</a>
+      <a href="#contact">Contact</a>
+    </nav>
+    <a class="btn btn-primary" href="/bot">Open Assistant</a>
+  </header>
 
-<!-- ═══════════════════════════════════ STAR FIELD CANVAS ═══ -->
-<canvas id="starfield"></canvas>
-
-<!-- ═══════════════════════════════════ FLOATING NAV ═══ -->
-<nav id="floatnav">
-  <div class="nav-inner">
-    <div class="nav-logo">
-      <div class="nav-eye-icon">
-        <div class="nav-iris"></div>
-        <div class="nav-pupil"></div>
-      </div>
-      <span class="nav-brand">OCUCARE</span>
-    </div>
-    <div class="nav-links">
-      <a href="#hero" class="nav-link">Home</a>
-      <a href="#diseases" class="nav-link">Diseases</a>
-      <a href="#symptoms" class="nav-link">Symptoms</a>
-      <a href="/bot" class="nav-link">OcuAI</a>
-    </div>
-    <a href="/bot" class="nav-cta" style="text-decoration:none;">Launch OcuAI</a>
-  </div>
-</nav>
-
-<!-- ═══════════════════════════════════ HERO SECTION ═══ -->
-<section id="hero">
-  <div class="hero-content">
-    <div class="hero-text">
-      <div class="hero-badge">
-        <span class="badge-dot"></span>
-        <span>AI SYSTEM ONLINE</span>
-      </div>
-      <h1 class="hero-title">
-        <span class="title-line">VISION</span>
-        <span class="title-line plasma">BEYOND</span>
-        <span class="title-line">GRAVITY</span>
-      </h1>
-      <p class="hero-subtitle">Advanced ocular intelligence system. Precision eye health analysis from orbit.</p>
-      <div class="hero-actions">
-        <a href="/bot" class="btn-primary" style="text-decoration:none; display:inline-block;">
-          <span>Launch OcuAI</span>
-          <div class="btn-glow"></div>
-        </a>
-        <a href="#diseases" class="btn-ghost">Explore Diseases</a>
-      </div>
-    </div>
-
-    <div class="hero-visual">
-      <!-- Eye Globe -->
-      <div class="eye-globe" id="eyeGlobe">
-        <div class="eye-outer-ring ring-1"></div>
-        <div class="eye-outer-ring ring-2"></div>
-        <div class="eye-outer-ring ring-3"></div>
-        <div class="eye-body">
-          <div class="eye-sclera">
-            <div class="eye-iris">
-              <div class="iris-pattern"></div>
-              <div class="eye-pupil">
-                <div class="pupil-core"></div>
-              </div>
-            </div>
-          </div>
-          <div class="scanline" id="scanline"></div>
+  <main>
+    <section class="hero medical-hero" id="home">
+      <div class="hero-copy">
+        <span class="eyebrow">Research prototype - not a diagnostic device</span>
+        <h1>Safety-aware eye-health guidance for screening support and patient education.</h1>
+        <p>
+          OcuCare combines source-grounded ophthalmology Q&A, fundus image screening,
+          multimodal consistency checks, and urgent symptom escalation in one controlled workflow.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="/bot">Start a guided check</a>
+          <a class="btn btn-secondary" href="#evaluation">View evaluation results</a>
         </div>
-        <!-- Orbiting elements -->
-        <div class="orbit-item orbit-item-1">
-          <div class="orbit-dot"></div>
-        </div>
-        <div class="orbit-item orbit-item-2">
-          <div class="orbit-dot gold"></div>
+        <div class="clinical-note">
+          <strong>Medical safety note:</strong>
+          OcuCare provides educational screening support only. Sudden vision loss, severe eye pain,
+          chemical exposure, trauma, flashes, floaters, or a curtain/shadow over vision require urgent
+          professional care.
         </div>
       </div>
 
-      <!-- HUD Cards -->
-      <div class="hud-card hud-1 float-1">
-        <div class="hud-header">
-          <span class="hud-dot active"></span>
-          <span>RETINAL SCAN</span>
+      <div class="hero-panel" aria-label="OcuCare workflow summary">
+        <div class="panel-header">
+          <span class="status-dot"></span>
+          <span>Workflow status</span>
         </div>
-        <div class="hud-value">ACTIVE</div>
-        <div class="hud-bar"><div class="hud-bar-fill" style="width:82%"></div></div>
-      </div>
-
-      <div class="hud-card hud-2 float-2">
-        <div class="hud-header">
-          <span class="hud-dot active"></span>
-          <span>AI ANALYSIS</span>
+        <div class="clinical-card">
+          <span class="card-label">Text-only</span>
+          <h2>Source-grounded triage</h2>
+          <p>Answers eye-health questions using retrieved knowledge-base evidence and safety framing.</p>
         </div>
-        <div class="hud-value">98.4<span class="hud-unit">%</span></div>
-      </div>
-
-      <div class="hud-card hud-3 float-3">
-        <div class="hud-header">
-          <span class="hud-dot warning"></span>
-          <span>IOP PRESSURE</span>
+        <div class="clinical-card">
+          <span class="card-label">Image-only</span>
+          <h2>Fundus screening support</h2>
+          <p>Uses the CNN model for selected disease classes, with uncertainty thresholds.</p>
         </div>
-        <div class="hud-value">Normal</div>
-        <div class="hud-sub">15 mmHg</div>
+        <div class="clinical-card warning">
+          <span class="card-label">Image + symptoms</span>
+          <h2>Consistency check</h2>
+          <p>Compares image-only and fusion outputs to flag contradiction or urgent symptoms.</p>
+        </div>
       </div>
-    </div>
-  </div>
+    </section>
 
-  <!-- Scroll indicator -->
-  <div class="scroll-indicator">
-    <div class="scroll-line"></div>
-    <span>SCROLL</span>
-  </div>
-</section>
-
-<!-- ═══════════════════════════════════ DISEASE CARDS ═══ -->
-<section id="diseases">
-  <div class="section-header reveal">
-    <div class="section-tag">OCULAR DATABASE</div>
-    <h2 class="section-title">DISEASE <span class="plasma">CONSTELLATION</span></h2>
-    <p class="section-sub">Navigate the spectrum of eye conditions. Each card holds mission-critical health intelligence.</p>
-  </div>
-
-  <div class="disease-grid">
-    <div class="disease-card reveal-card" style="--delay:0.1s; --tilt:-3deg">
-      <div class="card-glow"></div>
-      <div class="card-icon">👁️</div>
-      <h3>Glaucoma</h3>
-      <p>Increased intraocular pressure damaging the optic nerve. A silent thief of sight requiring early detection.</p>
-      <div class="card-tag">HIGH PRIORITY</div>
-    </div>
-
-    <div class="disease-card reveal-card" style="--delay:0.2s; --tilt:2deg">
-      <div class="card-glow"></div>
-      <div class="card-icon">🔵</div>
-      <h3>Cataracts</h3>
-      <p>Clouding of the natural lens causing blurred vision. Most common cause of reversible blindness worldwide.</p>
-      <div class="card-tag">TREATABLE</div>
-    </div>
-
-    <div class="disease-card reveal-card" style="--delay:0.3s; --tilt:-2deg">
-      <div class="card-glow"></div>
-      <div class="card-icon">🔴</div>
-      <h3>Macular Degeneration</h3>
-      <p>Progressive deterioration of the central retina (macula), affecting detailed vision and reading ability.</p>
-      <div class="card-tag">MONITOR</div>
-    </div>
-
-    <div class="disease-card reveal-card" style="--delay:0.4s; --tilt:3deg">
-      <div class="card-glow"></div>
-      <div class="card-icon">⚡</div>
-      <h3>Diabetic Retinopathy</h3>
-      <p>Diabetes-induced damage to the blood vessels of the retina. Leading cause of blindness in working-age adults.</p>
-      <div class="card-tag">SYSTEMIC</div>
-    </div>
-
-    <div class="disease-card reveal-card" style="--delay:0.5s; --tilt:-4deg">
-      <div class="card-glow"></div>
-      <div class="card-icon">🌊</div>
-      <h3>Dry Eye Syndrome</h3>
-      <p>Insufficient tear production or poor tear quality causing chronic discomfort and potential corneal damage.</p>
-      <div class="card-tag">COMMON</div>
-    </div>
-
-    <div class="disease-card reveal-card" style="--delay:0.6s; --tilt:2deg">
-      <div class="card-glow"></div>
-      <div class="card-icon">🔶</div>
-      <h3>Retinal Detachment</h3>
-      <p>Emergency separation of the retina from its supporting tissue. Requires immediate surgical intervention.</p>
-      <div class="card-tag urgent">EMERGENCY</div>
-    </div>
-  </div>
-</section>
-
-<!-- ═══════════════════════════════════ STATS ═══ -->
-<section id="stats">
-  <div class="stats-grid">
-    <div class="stat-item reveal">
-      <div class="stat-ring"></div>
-      <div class="stat-number" data-target="285">0</div>
-      <div class="stat-unit">Million</div>
-      <div class="stat-label">People with vision impairment worldwide</div>
-    </div>
-    <div class="stat-item reveal">
-      <div class="stat-ring"></div>
-      <div class="stat-number" data-target="98">0</div>
-      <div class="stat-unit">%</div>
-      <div class="stat-label">AI diagnostic accuracy rate</div>
-    </div>
-    <div class="stat-item reveal">
-      <div class="stat-ring"></div>
-      <div class="stat-number" data-target="75">0</div>
-      <div class="stat-unit">%</div>
-      <div class="stat-label">Vision loss cases are preventable</div>
-    </div>
-    <div class="stat-item reveal">
-      <div class="stat-ring"></div>
-      <div class="stat-number" data-target="24">0</div>
-      <div class="stat-unit">/7</div>
-      <div class="stat-label">OcuAI orbital monitoring active</div>
-    </div>
-  </div>
-</section>
-
-
-<!-- ═══════════════════════════════════ FOOTER ═══ -->
-<footer id="footer">
-  <div class="footer-inner">
-    <div class="footer-logo">
-      <div class="nav-eye-icon">
-        <div class="nav-iris"></div>
-        <div class="nav-pupil"></div>
+    <section class="section" id="workflow">
+      <div class="section-heading">
+        <span class="eyebrow">Clinical workflow</span>
+        <h2>Designed for transparent, bounded support</h2>
+        <p>Each path is intentionally scoped so the system does not present itself as a doctor.</p>
       </div>
-      <span class="nav-brand">OCUCARE</span>
-    </div>
-    <p class="footer-text">OcuAI is an informational system only. Always consult a licensed ophthalmologist for medical diagnosis and treatment.</p>
-    <div class="footer-divider"></div>
-    <div class="emergency-line">
-      <span class="emergency-dot"></span>
-      <span>Emergency Vision Loss? Contact an eye specialist immediately — do not wait.</span>
-    </div>
-    <p class="footer-copy">© 2026 OcuCare Orbital Intelligence. All rights reserved.</p>
-  </div>
-</footer>
+      <div class="feature-grid">
+        <article class="feature-card">
+          <h3>1. Ask an eye-health question</h3>
+          <p>Text-only questions are treated as educational triage. The system includes source evidence when the knowledge base is available.</p>
+        </article>
+        <article class="feature-card">
+          <h3>2. Upload a fundus image</h3>
+          <p>Image-only screening is limited to selected disease classes and uses model-score checks before producing an impression.</p>
+        </article>
+        <article class="feature-card">
+          <h3>3. Add symptom context</h3>
+          <p>Symptom text is handled as subjective supporting evidence. It does not automatically override image evidence.</p>
+        </article>
+        <article class="feature-card">
+          <h3>4. Detect unsafe cases</h3>
+          <p>Urgent symptoms and image-text disagreement trigger uncertainty or escalation rather than confident output.</p>
+        </article>
+      </div>
+    </section>
 
+    <section class="section tinted" id="evaluation">
+      <div class="section-heading">
+        <span class="eyebrow">Research evaluation</span>
+        <h2>Evidence used to defend the revised contribution</h2>
+        <p>These figures come from the local evaluation scripts and should be regenerated before final submission.</p>
+      </div>
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <strong>10 / 10</strong>
+          <span>RAG safety and evidence checks</span>
+        </div>
+        <div class="metric-card">
+          <strong>5 / 5</strong>
+          <span>Image-only screening checks</span>
+        </div>
+        <div class="metric-card">
+          <strong>9 / 10</strong>
+          <span>Latest visible multimodal safety check run</span>
+        </div>
+      </div>
+      <div class="evidence-list">
+        <div>
+          <h3>What is measured?</h3>
+          <p>Triage framing, evidence visibility, screening language, uncertainty handling, image-vs-text disagreement, and urgent symptom escalation.</p>
+        </div>
+        <div>
+          <h3>What is not claimed?</h3>
+          <p>These tests do not prove clinical safety or diagnostic accuracy. Ophthalmologist review and larger external datasets are still required.</p>
+        </div>
+      </div>
+    </section>
 
-<!-- ═══════════════════════════════════ SCRIPTS ═══ -->
-<script>
-// ── STARFIELD CANVAS ──────────────────────────────────────────────────────────
-const canvas = document.getElementById('starfield');
-const ctx = canvas.getContext('2d');
-let W, H, particles = [], mouse = { x: 0, y: 0 };
+    <section class="section" id="resources">
+      <div class="section-heading">
+        <span class="eyebrow">Resources and articles</span>
+        <h2>Educational content for users and reviewers</h2>
+      </div>
+      <div class="article-grid">
+        <article class="article-card">
+          <span>Patient education</span>
+          <h3>When eye symptoms need urgent attention</h3>
+          <p>Sudden vision loss, trauma, chemical exposure, severe pain, flashes, floaters, and curtain-like vision changes require urgent care.</p>
+        </article>
+        <article class="article-card">
+          <span>Research note</span>
+          <h3>Why source-grounded answers matter</h3>
+          <p>OcuCare shows retrieved evidence so users and evaluators can inspect the basis of text-only responses.</p>
+        </article>
+        <article class="article-card">
+          <span>Model limitation</span>
+          <h3>Why image screening is class-limited</h3>
+          <p>The current image models support selected conditions only. Unsupported cases should be treated as uncertain.</p>
+        </article>
+      </div>
+    </section>
 
-function resize() {
-  W = canvas.width = window.innerWidth;
-  H = canvas.height = window.innerHeight;
-}
+    <section class="section tinted" id="updates">
+      <div class="section-heading">
+        <span class="eyebrow">Project updates</span>
+        <h2>Transparent notes instead of fake live news</h2>
+        <p>These cards describe the current research prototype status and can be replaced with approved project announcements later.</p>
+      </div>
+      <div class="article-grid">
+        <article class="article-card">
+          <span>Safety update</span>
+          <h3>Urgent symptoms are escalated</h3>
+          <p>The assistant is designed to avoid routine answers when users report severe pain, sudden vision changes, trauma, or chemical exposure.</p>
+        </article>
+        <article class="article-card">
+          <span>Evaluation update</span>
+          <h3>Local checks are available</h3>
+          <p>Text, image, and multimodal safety scripts are included so reviewers can inspect behavior instead of relying on screenshots.</p>
+        </article>
+        <article class="article-card">
+          <span>Future work</span>
+          <h3>Clinical validation is still required</h3>
+          <p>The system needs ophthalmologist review, broader datasets, and documented limitations before any clinical deployment.</p>
+        </article>
+      </div>
+    </section>
 
-function createParticles() {
-  particles = [];
-  const configs = [
-    { count: 20, sizeMin: 2,   sizeMax: 3,   speedMin: 0.4, speedMax: 0.8,  layer: 1 },
-    { count: 30, sizeMin: 1,   sizeMax: 2,   speedMin: 0.2, speedMax: 0.4,  layer: 2 },
-    { count: 30, sizeMin: 0.5, sizeMax: 1,   speedMin: 0.05,speedMax: 0.15, layer: 3 },
-  ];
-  configs.forEach(cfg => {
-    for (let i = 0; i < cfg.count; i++) {
-      const rand = Math.random();
-      const color = rand < 0.6 ? 'rgba(0,245,255,' : rand < 0.9 ? 'rgba(255,255,255,' : 'rgba(255,215,0,';
-      particles.push({
-        x: Math.random() * W,
-        y: Math.random() * H,
-        vx: (Math.random() - 0.5) * cfg.speedMax + (Math.random() > 0.5 ? cfg.speedMin : -cfg.speedMin),
-        vy: (Math.random() - 0.5) * cfg.speedMax + (Math.random() > 0.5 ? cfg.speedMin : -cfg.speedMin),
-        size: cfg.sizeMin + Math.random() * (cfg.sizeMax - cfg.sizeMin),
-        color: color,
-        alpha: 0.4 + Math.random() * 0.6,
-        layer: cfg.layer,
-      });
-    }
-  });
-}
+    <section class="section contact-section" id="contact">
+      <div>
+        <span class="eyebrow">Contact and escalation</span>
+        <h2>Use OcuCare as support, not a replacement for care.</h2>
+        <p>
+          For real medical symptoms, contact a licensed ophthalmologist, eye clinic, hospital eye unit,
+          or local emergency service. OcuCare does not provide appointments or emergency response.
+        </p>
+      </div>
+      <a class="btn btn-primary" href="/bot">Open Assistant</a>
+    </section>
+  </main>
 
-function animateStars() {
-  ctx.clearRect(0, 0, W, H);
-  particles.forEach(p => {
-    const parallaxX = (mouse.x / W - 0.5) * (4 - p.layer) * -2;
-    const parallaxY = (mouse.y / H - 0.5) * (4 - p.layer) * -2;
-    p.x += p.vx;
-    p.y += p.vy;
-    if (p.x < 0) p.x = W;
-    if (p.x > W) p.x = 0;
-    if (p.y < 0) p.y = H;
-    if (p.y > H) p.y = 0;
-    ctx.beginPath();
-    ctx.arc(p.x + parallaxX, p.y + parallaxY, p.size, 0, Math.PI * 2);
-    ctx.fillStyle = p.color + p.alpha + ')';
-    ctx.fill();
-  });
-  requestAnimationFrame(animateStars);
-}
-
-window.addEventListener('resize', () => { resize(); createParticles(); });
-document.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
-resize();
-createParticles();
-animateStars();
-
-
-// ── SCROLL REVEAL ─────────────────────────────────────────────────────────────
-const revealObserver = new IntersectionObserver((entries) => {
-  entries.forEach(e => {
-    if (e.isIntersecting) {
-      e.target.classList.add('visible');
-      // Count-up for stats
-      const num = e.target.querySelector('.stat-number');
-      if (num && !num.dataset.counted) {
-        num.dataset.counted = true;
-        const target = parseInt(num.dataset.target);
-        let current = 0;
-        const step = target / 60;
-        const interval = setInterval(() => {
-          current += step;
-          if (current >= target) { num.textContent = target; clearInterval(interval); }
-          else num.textContent = Math.floor(current);
-        }, 25);
-      }
-    }
-  });
-}, { threshold: 0.15 });
-
-document.querySelectorAll('.reveal, .reveal-card, .stat-item').forEach(el => revealObserver.observe(el));
-
-
-// ── SCANLINE ANIMATION ────────────────────────────────────────────────────────
-function runScanline() {
-  const sl = document.getElementById('scanline');
-  if (sl) {
-    sl.style.animation = 'none';
-    sl.offsetHeight; // reflow
-    sl.style.animation = 'scanline 1.5s linear forwards';
-  }
-  setTimeout(runScanline, 6000);
-}
-setTimeout(runScanline, 2000);
-
-// ── NAV SCROLL BEHAVIOR ───────────────────────────────────────────────────────
-window.addEventListener('scroll', () => {
-  const nav = document.getElementById('floatnav');
-  if (window.scrollY > 80) nav.classList.add('scrolled');
-  else nav.classList.remove('scrolled');
-});
-
-</script>
+  <footer class="site-footer">
+    <p>OcuCare is a research prototype for educational screening support. It is not clinically validated and does not replace professional diagnosis or treatment.</p>
+    <p>Copyright 2026 OcuCare Research Project</p>
+  </footer>
 </body>
 </html>

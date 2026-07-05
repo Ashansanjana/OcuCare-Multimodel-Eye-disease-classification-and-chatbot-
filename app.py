@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, send_from_directory
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 import os
@@ -18,6 +18,19 @@ load_dotenv()
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = os.path.join('data', 'uploads')
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+FRONTEND_DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend", "dist")
+
+SCREENING_CONFIDENCE_THRESHOLD = 0.70
+SCREENING_MARGIN_THRESHOLD = 0.15
+STRONG_CONFLICT_THRESHOLD = 0.80
+MAX_EVIDENCE_CHARS = 900
+
+URGENT_SYMPTOM_TERMS = (
+    "sudden vision loss", "vision loss", "loss of sight", "severe pain",
+    "eye pain", "chemical", "chemical exposure", "chemical injury", "trauma",
+    "injury", "flashes", "floaters", "curtain", "shadow over vision",
+    "painful red eye", "nausea", "headache", "double vision",
+)
 
 # ── NOTE: Inference (TensorFlow/Keras) is imported AFTER embeddings below ────
 # This ensures PyTorch + NumPy (used by sentence-transformers) are fully
@@ -91,7 +104,7 @@ if GOOGLE_API_KEY:
         chatModel = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash",
             temperature=0.2,
-            max_output_tokens=1024
+            max_output_tokens=2048
         )
         print("[OK] Gemini model ready.")
     except Exception as e:
@@ -102,6 +115,7 @@ else:
 
 # ── RAG Chain ─────────────────────────────────────────────────────────────────
 rag_chain = None
+query_optimizer = None
 if retriever and chatModel:
     try:
         from langchain_core.prompts import ChatPromptTemplate
@@ -110,7 +124,11 @@ if retriever and chatModel:
         from src.prompt import system_prompt
 
         def format_docs(docs):
-            return "\n\n".join(doc.page_content for doc in docs)
+            blocks = []
+            for idx, doc in enumerate(docs, 1):
+                label = _doc_source_label(doc, idx)
+                blocks.append(f"[{idx}] Source: {label}\n{doc.page_content}")
+            return "\n\n".join(blocks)
 
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_prompt),
@@ -129,15 +147,7 @@ if retriever and chatModel:
             | StrOutputParser()
         )
 
-        rag_chain = (
-            {
-                "context": query_optimizer | retriever | format_docs,
-                "input": RunnablePassthrough()
-            }
-            | prompt
-            | chatModel
-            | StrOutputParser()
-        )
+        rag_chain = prompt | chatModel | StrOutputParser()
         print("[OK] RAG chain ready.")
     except Exception as e:
         print(f"[WARN] RAG chain failed: {e}")
@@ -190,6 +200,195 @@ else:
     print("[SKIP] Diagnosis chain skipped (no chat model).")
 
 
+def _top_probabilities(result: dict, limit: int = 3) -> str:
+    probs = result.get("all_probs") or {}
+    if not probs:
+        return "No probability distribution returned."
+    ranked = sorted(probs.items(), key=lambda item: item[1], reverse=True)[:limit]
+    return "\n".join(f"- {label}: {score:.1%}" for label, score in ranked)
+
+
+def _is_uncertain(result: dict) -> bool:
+    return bool(_uncertainty_reasons(result))
+
+
+def _has_urgent_symptom_text(text: str) -> bool:
+    msg = (text or "").lower()
+    return any(term in msg for term in URGENT_SYMPTOM_TERMS)
+
+
+def _uncertainty_reasons(result: dict) -> list:
+    reasons = []
+    confidence = float(result.get("confidence", 0.0))
+    if confidence < SCREENING_CONFIDENCE_THRESHOLD:
+        reasons.append(
+            f"top model score is below threshold ({confidence:.1%} < {SCREENING_CONFIDENCE_THRESHOLD:.0%})"
+        )
+
+    probs = result.get("all_probs") or {}
+    ranked = sorted(probs.items(), key=lambda item: item[1], reverse=True)
+    if len(ranked) >= 2:
+        margin = float(ranked[0][1]) - float(ranked[1][1])
+        if margin < SCREENING_MARGIN_THRESHOLD:
+            reasons.append(
+                f"top two predictions are too close ({margin:.1%} margin < {SCREENING_MARGIN_THRESHOLD:.0%})"
+            )
+    elif not probs:
+        reasons.append("probability distribution is unavailable")
+    return reasons
+
+
+def _normalize_label(label: str) -> str:
+    label = (label or "").strip().lower()
+    if label in ("retinal disease", "diabetic retinopathy"):
+        return "retinal disease"
+    return label
+
+
+def _assess_multimodal_consistency(image_result: dict, fusion_result: dict) -> dict:
+    image_label = image_result.get("diagnosis", "")
+    fusion_label = fusion_result.get("diagnosis", "")
+    image_conf = float(image_result.get("confidence", 0.0))
+    fusion_conf = float(fusion_result.get("confidence", 0.0))
+    labels_agree = _normalize_label(image_label) == _normalize_label(fusion_label)
+
+    if labels_agree:
+        status = "agreement"
+        message = "Image-only and multimodal evidence point to the same supported condition."
+    elif image_conf >= STRONG_CONFLICT_THRESHOLD and fusion_conf >= STRONG_CONFLICT_THRESHOLD:
+        status = "conflict"
+        message = "Image evidence and symptom-influenced fusion evidence strongly disagree."
+    else:
+        status = "uncertain"
+        message = "The evidence is mixed or not confident enough for a reliable screening result."
+
+    return {
+        "status": status,
+        "message": message,
+        "image_label": image_label,
+        "fusion_label": fusion_label,
+        "image_confidence": image_conf,
+        "fusion_confidence": fusion_conf,
+    }
+
+
+def _uncertain_screening_response(reason: str, image_result: dict = None,
+                                  fusion_result: dict = None,
+                                  symptoms: str = "") -> str:
+    lines = [
+        "OcuAI Screening Support Result",
+        "",
+        "Screening Status: Uncertain / unsupported",
+        "",
+        f"Reason: {reason}",
+        "",
+        "This is not a definitive medical diagnosis. The system is designed as a research prototype for screening support and patient education.",
+    ]
+
+    if symptoms:
+        lines.extend([
+            "",
+            "Reported Symptoms:",
+            symptoms,
+        ])
+
+    if image_result:
+        lines.extend([
+            "",
+            "Image-only model evidence:",
+            f"- Top result: {image_result.get('diagnosis', 'Unavailable')} ({float(image_result.get('confidence', 0.0)):.1%})",
+            _top_probabilities(image_result),
+        ])
+
+    if fusion_result:
+        lines.extend([
+            "",
+            "Image + symptom fusion evidence:",
+            f"- Top result: {fusion_result.get('diagnosis', 'Unavailable')} ({float(fusion_result.get('confidence', 0.0)):.1%})",
+            _top_probabilities(fusion_result),
+        ])
+
+    lines.extend([
+        "",
+        "Recommended action:",
+        "- Do not rely on this output as a diagnosis.",
+        "- Use a valid medical eye image such as a fundus/retinal scan when image screening is required.",
+        "- If symptoms are sudden, severe, painful, or involve vision loss, seek urgent ophthalmology care.",
+        "- For non-urgent symptoms, consult a licensed eye-care professional for an in-person evaluation.",
+    ])
+    return "\n".join(lines)
+
+
+def _triage_prefix(user_message: str) -> str:
+    if _has_urgent_symptom_text(user_message):
+        urgency = "Urgency flag: Possible urgent symptom mentioned. Prompt in-person ophthalmology care is recommended."
+    else:
+        urgency = "Urgency flag: No automatic emergency symptom detected from text alone."
+    return (
+        "Text-only triage mode\n"
+        "No medical eye image was provided, so OcuAI cannot perform image-based screening. "
+        "This response is educational triage support, not a diagnosis.\n"
+        f"{urgency}\n\n"
+        "---\n\n"
+    )
+
+
+def _doc_source_label(doc, index: int) -> str:
+    metadata = getattr(doc, "metadata", {}) or {}
+    source = metadata.get("source") or "Knowledge base document"
+    page = metadata.get("page")
+    if isinstance(page, int) or (isinstance(page, str) and page.isdigit()):
+        return f"[{index}] {os.path.basename(str(source))}, page {int(page) + 1}"
+    return f"[{index}] {os.path.basename(str(source))}"
+
+
+def _format_retrieved_evidence(docs) -> str:
+    if not docs:
+        return (
+            "\n\n---\n"
+            "Knowledge Base Evidence\n"
+            "No retrieved knowledge-base passages were returned for this question."
+        )
+
+    lines = [
+        "\n\n---",
+        "Knowledge Base Evidence",
+        "Retrieved passages used for source-grounded answering:",
+    ]
+    for idx, doc in enumerate(docs, 1):
+        snippet = " ".join((getattr(doc, "page_content", "") or "").split())
+        if len(snippet) > MAX_EVIDENCE_CHARS:
+            snippet = snippet[:MAX_EVIDENCE_CHARS].rstrip() + "..."
+        lines.extend([
+            "",
+            _doc_source_label(doc, idx),
+            snippet,
+        ])
+    return "\n".join(lines)
+
+
+def _format_docs_for_prompt(docs) -> str:
+    blocks = []
+    for idx, doc in enumerate(docs or [], 1):
+        label = _doc_source_label(doc, idx)
+        blocks.append(f"[{idx}] Source: {label}\n{getattr(doc, 'page_content', '')}")
+    return "\n\n".join(blocks) if blocks else "No relevant OcuCare knowledge-base context was retrieved."
+
+
+def _retrieve_evidence_for_query(user_message: str):
+    if not retriever:
+        return []
+    optimized = user_message
+    if query_optimizer:
+        try:
+            optimized = query_optimizer.invoke({"input": user_message})
+        except Exception as e:
+            print(f"[RAG] Query optimizer failed for evidence retrieval: {e}")
+    docs = retriever.invoke(optimized)
+    print(f"[RAG] Retrieved {len(docs)} evidence docs for text-only answer.")
+    return docs
+
+
 def _explain_diagnosis(diagnosis: str, confidence: float, model_type: str,
                        patient_symptoms: str = "") -> str:
     """
@@ -232,13 +431,27 @@ def _explain_diagnosis(diagnosis: str, confidence: float, model_type: str,
 
         # ── Step 3: Invoke Gemini with the diagnosis prompt ───────────────────
         print(f"[Diagnosis] Generating Gemini report for '{diagnosis}' ({confidence:.2%})...")
-        response = diagnosis_chain.invoke({
+        payload = {
             "diagnosis": diagnosis,
             "confidence": f"{confidence:.1%}",
             "model_type": model_type,
             "symptoms_section": symptoms_section,
             "context": context,
-        })
+        }
+        response = diagnosis_chain.invoke(payload)
+
+        required_sections = (
+            "What This Condition Means",
+            "Why The Model May Have Predicted This",
+            "Common Symptoms",
+            "Causes And Risk Factors",
+            "Treatment And Management",
+            "Clinical Recommendation",
+        )
+        if len(str(response)) < 900 or not all(section in str(response) for section in required_sections):
+            print("[Diagnosis] Short/incomplete report detected. Retrying once...")
+            response = diagnosis_chain.invoke(payload)
+
         print(f"[Diagnosis] Report generated ({len(response)} chars).")
         return response
 
@@ -256,12 +469,27 @@ def _explain_diagnosis(diagnosis: str, confidence: float, model_type: str,
 print("\n[READY] Flask server initializing...\n")
 
 # ── Routes ────────────────────────────────────────────────────────────────────
+def _has_react_frontend():
+    return os.path.exists(os.path.join(FRONTEND_DIST, "index.html"))
+
+
+@app.route("/app/<path:filename>")
+def react_assets(filename):
+    if _has_react_frontend():
+        return send_from_directory(FRONTEND_DIST, filename)
+    return ("React frontend has not been built yet.", 404)
+
+
 @app.route("/")
 def index():
+    if _has_react_frontend():
+        return send_from_directory(FRONTEND_DIST, "index.html")
     return render_template("chat.html")
 
 @app.route("/bot")
 def bot_page():
+    if _has_react_frontend():
+        return send_from_directory(FRONTEND_DIST, "index.html")
     return render_template("chatbot_page.html")
 
 @app.route("/health")
@@ -284,20 +512,72 @@ def chat():
     # ── Image upload path ─────────────────────────────────────────────────
     if image_file and image_file.filename != '':
         filename = secure_filename(image_file.filename)
+        os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         image_file.save(filepath)
 
         if msg:
-            # Image + Text → Fusion → Gemini doctor report
+            # Image + Text -> cross-check image-only evidence against fusion.
             try:
-                res = predict_fusion(filepath, msg)
-                if res['diagnosis'].startswith("Fusion Error"):
-                    return f"⚠️ Fusion inference error: {res['diagnosis']}"
+                image_res = predict_cnn(filepath)
+                if image_res['diagnosis'].startswith("CNN Error"):
+                    return f"⚠️ CNN inference error: {image_res['diagnosis']}"
+
+                fusion_res = predict_fusion(filepath, msg)
+                if fusion_res['diagnosis'].startswith("Fusion Error"):
+                    return f"⚠️ Fusion inference error: {fusion_res['diagnosis']}"
+
+                consistency = _assess_multimodal_consistency(image_res, fusion_res)
+                if _has_urgent_symptom_text(msg):
+                    reason = (
+                        "Urgent symptom text was reported. Emergency red-flag symptoms should not be overridden "
+                        "by a normal or agreeing image-screening result. "
+                        f"Image-only result: {consistency['image_label']} "
+                        f"({consistency['image_confidence']:.1%}); "
+                        f"fusion result: {consistency['fusion_label']} "
+                        f"({consistency['fusion_confidence']:.1%})."
+                    )
+                    return _uncertain_screening_response(
+                        reason=reason,
+                        image_result=image_res,
+                        fusion_result=fusion_res,
+                        symptoms=msg,
+                    )
+
+                if consistency["status"] != "agreement" or _is_uncertain(fusion_res) or _is_uncertain(image_res):
+                    uncertainty_bits = []
+                    image_uncertainty = "; ".join(_uncertainty_reasons(image_res))
+                    fusion_uncertainty = "; ".join(_uncertainty_reasons(fusion_res))
+                    if image_uncertainty:
+                        uncertainty_bits.append(f"Image model uncertainty: {image_uncertainty}")
+                    if fusion_uncertainty:
+                        uncertainty_bits.append(f"Fusion uncertainty: {fusion_uncertainty}")
+                    reason = (
+                        f"{consistency['message']} "
+                        f"Image-only result: {consistency['image_label']} "
+                        f"({consistency['image_confidence']:.1%}); "
+                        f"fusion result: {consistency['fusion_label']} "
+                        f"({consistency['fusion_confidence']:.1%})."
+                    )
+                    if uncertainty_bits:
+                        reason += " " + " ".join(f"{bit}." for bit in uncertainty_bits)
+                    return _uncertain_screening_response(
+                        reason=reason,
+                        image_result=image_res,
+                        fusion_result=fusion_res,
+                        symptoms=msg,
+                    )
+
+                symptoms_with_crosscheck = (
+                    f"{msg}\n"
+                    f"Image-only cross-check agreed: {image_res['diagnosis']} "
+                    f"({image_res['confidence']:.1%})."
+                )
                 return _explain_diagnosis(
-                    diagnosis=res['diagnosis'],
-                    confidence=res['confidence'],
-                    model_type="Multi-Modal Fusion (InceptionV3 + BERT)",
-                    patient_symptoms=msg,
+                    diagnosis=fusion_res['diagnosis'],
+                    confidence=fusion_res['confidence'],
+                    model_type="Multi-Modal Fusion (InceptionV3 + BERT) with image-only consistency check",
+                    patient_symptoms=symptoms_with_crosscheck,
                 )
             except Exception as e:
                 traceback.print_exc()
@@ -308,6 +588,12 @@ def chat():
                 res = predict_cnn(filepath)
                 if res['diagnosis'].startswith("CNN Error"):
                     return f"⚠️ CNN inference error: {res['diagnosis']}"
+                if _is_uncertain(res):
+                    uncertainty_note = "; ".join(_uncertainty_reasons(res))
+                    return _uncertain_screening_response(
+                        reason=f"The image-only model is uncertain: {uncertainty_note}.",
+                        image_result=res,
+                    )
                 return _explain_diagnosis(
                     diagnosis=res['diagnosis'],
                     confidence=res['confidence'],
@@ -323,10 +609,14 @@ def chat():
             try:
                 safe_msg = msg.encode('ascii', errors='replace').decode()
                 print(f"[RAG] Querying: {safe_msg}")
-                response = rag_chain.invoke(msg)
+                docs = _retrieve_evidence_for_query(msg)
+                response = rag_chain.invoke({
+                    "input": msg,
+                    "context": _format_docs_for_prompt(docs),
+                })
                 safe_resp = response[:100].encode('ascii', errors='replace').decode()
                 print(f"[RAG] Response (KB): {safe_resp}...")
-                return str(response)
+                return _triage_prefix(msg) + str(response) + _format_retrieved_evidence(docs)
             except Exception as rag_err:
                 # Pinecone / network failure — fall back to direct Gemini
                 err_str = str(rag_err)
@@ -339,7 +629,7 @@ def chat():
                     try:
                         response = direct_chain.invoke(msg)
                         print(f"[RAG] Response (direct Gemini): {response[:80].encode('ascii', errors='replace').decode()}...")
-                        return str(response) + "\n\n---\n⚠️ *OcuCare Knowledge Base is temporarily offline. This response is from OcuAI general knowledge only.*"
+                        return _triage_prefix(msg) + str(response) + "\n\n---\n⚠️ *OcuCare Knowledge Base is temporarily offline. This response is from OcuAI general knowledge only. Citations are unavailable.*"
                     except Exception as direct_err:
                         print(f"[Direct Gemini ERROR] {direct_err}")
                         return "Sorry, I could not reach OcuAI at this time. Please check your internet connection."
@@ -355,7 +645,7 @@ def chat():
             print(f"[Direct] No RAG chain, using direct Gemini for: {msg[:60]}")
             try:
                 response = direct_chain.invoke(msg)
-                return str(response) + "\n\n---\n⚠️ *OcuCare Knowledge Base not connected. Response from OcuAI general knowledge.*"
+                return _triage_prefix(msg) + str(response) + "\n\n---\n⚠️ *OcuCare Knowledge Base not connected. Response from OcuAI general knowledge. Citations are unavailable.*"
             except Exception as e:
                 return f"Sorry, OcuAI is unavailable: {str(e)[:100]}"
         else:
@@ -364,4 +654,12 @@ def chat():
     return "No input provided."
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080, debug=False, use_reloader=False)
+    port = int(os.environ.get("PORT", "5051"))
+    host = os.environ.get("HOST", "127.0.0.1")
+    print(f"[READY] Serving on http://{host}:{port}")
+    try:
+        app.run(host=host, port=port, debug=False, use_reloader=False)
+    except OSError as e:
+        print(f"[ERROR] Could not start server on {host}:{port}: {e}")
+        print("[HELP] Try another local port, for example:")
+        print("       $env:HOST='127.0.0.1'; $env:PORT='5052'; python app.py")

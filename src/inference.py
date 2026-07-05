@@ -43,7 +43,7 @@ try:
         _raw_map = json.load(f)
     DIAGNOSIS_MAP = {int(k): v for k, v in _raw_map.items()}
 except Exception:
-    DIAGNOSIS_MAP = {0: "Glaucoma", 1: "Cataract", 2: "Retinal Disease", 3: "Normal"}
+    DIAGNOSIS_MAP = {0: "Glaucoma", 1: "Cataract", 2: "Diabetic Retinopathy", 3: "Normal"}
 
 num_classes = len(DIAGNOSIS_MAP)
 
