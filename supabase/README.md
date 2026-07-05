@@ -20,3 +20,13 @@ npm.cmd run build
 ```
 
 Anonymous users can still chat. Logged-in users can save and reload chat sessions.
+
+## Automatic Eye Health Summary
+
+If you already ran the original schema before the summary feature was added, run:
+
+```sql
+-- supabase/add_patient_summaries.sql
+```
+
+The app automatically updates `patient_summaries` after logged-in chat interactions. Users only click `Eye Health Summary` to view the latest generated summary; they do not need to manually update it.

@@ -9,6 +9,7 @@ export default defineConfig({
     proxy: {
       "/get": "http://127.0.0.1:5051",
       "/health": "http://127.0.0.1:5051",
+      "/summary": "http://127.0.0.1:5051",
     },
   },
 });

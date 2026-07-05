@@ -1,9 +1,10 @@
-from flask import Flask, render_template, request, send_from_directory
+from flask import Flask, render_template, request, send_from_directory, jsonify
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 import os
 import sys
 import traceback
+import json
 
 # Force UTF-8 output so emoji in prompts/responses don't crash on Windows
 os.environ["PYTHONIOENCODING"] = "utf-8"
@@ -473,6 +474,42 @@ def _has_react_frontend():
     return os.path.exists(os.path.join(FRONTEND_DIST, "index.html"))
 
 
+def _extract_json_object(raw_text: str) -> dict:
+    text = str(raw_text or "").strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+    try:
+        return json.loads(text)
+    except Exception:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return json.loads(text[start:end + 1])
+        raise
+
+
+def _fallback_patient_summary(messages: list) -> dict:
+    user_messages = [m.get("content", "") for m in messages if m.get("role") == "user"]
+    recent = " ".join(user_messages[-4:]).strip()
+    return {
+        "summary_text": (
+            "This is an automatic non-diagnostic summary of recent eye-health chats. "
+            + (f"Recent patient-reported concerns include: {recent[:500]}" if recent else "No patient concerns were found yet.")
+        ),
+        "symptoms": [],
+        "topics": [],
+        "red_flags": [],
+        "image_history": [],
+        "recommended_next_steps": [
+            "Use this summary only as a preparation aid for professional eye care.",
+            "Seek urgent care for sudden vision loss, severe pain, trauma, chemical exposure, flashes, floaters, or curtain-like vision changes.",
+        ],
+        "safety_note": "This is not a diagnosis. It summarizes user-reported information and AI screening-support outputs.",
+    }
+
+
 @app.route("/app/<path:filename>")
 def react_assets(filename):
     if _has_react_frontend():
@@ -501,6 +538,80 @@ def health():
         "chatModel": chatModel is not None,
         "rag_chain": rag_chain is not None,
     }
+
+
+@app.route("/summary", methods=["POST"])
+def patient_summary():
+    payload = request.get_json(silent=True) or {}
+    messages = payload.get("messages") or []
+    if not isinstance(messages, list):
+        return jsonify({"error": "messages must be a list"}), 400
+
+    cleaned = []
+    for item in messages[-120:]:
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role") if item.get("role") in ("user", "assistant") else "unknown"
+        content = str(item.get("content") or "")[:1800]
+        image_note = " [image uploaded]" if item.get("image_present") else ""
+        if content or image_note:
+            cleaned.append({"role": role, "content": content + image_note})
+
+    if not cleaned:
+        return jsonify(_fallback_patient_summary([]))
+
+    if not chatModel:
+        return jsonify(_fallback_patient_summary(cleaned))
+
+    transcript = "\n".join(
+        f"{item['role'].upper()}: {item['content']}" for item in cleaned
+    )[:14000]
+
+    prompt = f"""
+You are generating an automatic Eye Health Summary for a logged-in user of OcuCare.
+
+Rules:
+- This is NOT a medical diagnosis.
+- Summarize only what appears in the transcript.
+- Do not invent patient demographics, diseases, test results, doctors, hospitals, or appointments.
+- Use cautious language: "reported", "discussed", "screening support", "may need".
+- If urgent symptoms are present, include them in red_flags and recommended_next_steps.
+- Return ONLY valid JSON. No markdown.
+
+JSON shape:
+{{
+  "summary_text": "short patient-friendly paragraph",
+  "symptoms": ["reported symptoms or concerns"],
+  "topics": ["eye-health topics or conditions discussed"],
+  "red_flags": ["urgent warning signs mentioned, or empty array"],
+  "image_history": ["image upload/screening notes, or empty array"],
+  "recommended_next_steps": ["safe next steps"],
+  "safety_note": "This is not a diagnosis..."
+}}
+
+Transcript:
+{transcript}
+"""
+
+    try:
+        response = chatModel.invoke(prompt)
+        content = getattr(response, "content", response)
+        data = _extract_json_object(str(content))
+        fallback = _fallback_patient_summary(cleaned)
+        return jsonify({
+            "summary_text": str(data.get("summary_text") or fallback["summary_text"]),
+            "symptoms": data.get("symptoms") if isinstance(data.get("symptoms"), list) else [],
+            "topics": data.get("topics") if isinstance(data.get("topics"), list) else [],
+            "red_flags": data.get("red_flags") if isinstance(data.get("red_flags"), list) else [],
+            "image_history": data.get("image_history") if isinstance(data.get("image_history"), list) else [],
+            "recommended_next_steps": data.get("recommended_next_steps") if isinstance(data.get("recommended_next_steps"), list) else fallback["recommended_next_steps"],
+            "safety_note": str(data.get("safety_note") or fallback["safety_note"]),
+        })
+    except Exception as e:
+        print(f"[Summary ERROR] {e}")
+        traceback.print_exc()
+        return jsonify(_fallback_patient_summary(cleaned))
+
 
 @app.route("/get", methods=["GET", "POST"])
 def chat():

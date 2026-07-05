@@ -30,11 +30,28 @@ create table if not exists public.chat_messages (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.patient_summaries (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  summary_text text not null default '',
+  symptoms jsonb not null default '[]'::jsonb,
+  topics jsonb not null default '[]'::jsonb,
+  red_flags jsonb not null default '[]'::jsonb,
+  image_history jsonb not null default '[]'::jsonb,
+  recommended_next_steps jsonb not null default '[]'::jsonb,
+  safety_note text not null default 'This is not a diagnosis. It summarizes user-reported information and AI screening-support outputs.',
+  last_generated_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create index if not exists chat_sessions_user_updated_idx
   on public.chat_sessions(user_id, updated_at desc);
 
 create index if not exists chat_messages_session_created_idx
   on public.chat_messages(session_id, created_at asc);
+
+create index if not exists patient_summaries_generated_idx
+  on public.patient_summaries(last_generated_at desc);
 
 create or replace function public.set_updated_at()
 returns trigger
@@ -54,6 +71,11 @@ for each row execute function public.set_updated_at();
 drop trigger if exists chat_sessions_set_updated_at on public.chat_sessions;
 create trigger chat_sessions_set_updated_at
 before update on public.chat_sessions
+for each row execute function public.set_updated_at();
+
+drop trigger if exists patient_summaries_set_updated_at on public.patient_summaries;
+create trigger patient_summaries_set_updated_at
+before update on public.patient_summaries
 for each row execute function public.set_updated_at();
 
 create or replace function public.handle_new_user()
@@ -82,6 +104,7 @@ for each row execute function public.handle_new_user();
 alter table public.profiles enable row level security;
 alter table public.chat_sessions enable row level security;
 alter table public.chat_messages enable row level security;
+alter table public.patient_summaries enable row level security;
 
 drop policy if exists "Users can read own profile" on public.profiles;
 create policy "Users can read own profile"
@@ -136,4 +159,25 @@ with check (
 drop policy if exists "Users can delete own chat messages" on public.chat_messages;
 create policy "Users can delete own chat messages"
 on public.chat_messages for delete
+using (auth.uid() = user_id);
+
+drop policy if exists "Users can read own patient summary" on public.patient_summaries;
+create policy "Users can read own patient summary"
+on public.patient_summaries for select
+using (auth.uid() = user_id);
+
+drop policy if exists "Users can insert own patient summary" on public.patient_summaries;
+create policy "Users can insert own patient summary"
+on public.patient_summaries for insert
+with check (auth.uid() = user_id);
+
+drop policy if exists "Users can update own patient summary" on public.patient_summaries;
+create policy "Users can update own patient summary"
+on public.patient_summaries for update
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+drop policy if exists "Users can delete own patient summary" on public.patient_summaries;
+create policy "Users can delete own patient summary"
+on public.patient_summaries for delete
 using (auth.uid() = user_id);

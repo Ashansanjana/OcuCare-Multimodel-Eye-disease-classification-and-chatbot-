@@ -395,6 +395,10 @@ function AssistantPage() {
   const [chatSessions, setChatSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [patientSummary, setPatientSummary] = useState(null);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryNotice, setSummaryNotice] = useState("");
   const fileInputRef = useRef(null);
   const activeMode = file && text.trim() ? "Image + symptoms" : file ? "Image-only" : "Text-only";
   const user = authSession?.user || null;
@@ -422,6 +426,8 @@ function AssistantPage() {
       if (!session) {
         setChatSessions([]);
         setActiveSessionId(null);
+        setPatientSummary(null);
+        setSummaryOpen(false);
         setMessages([welcomeMessage]);
       }
     });
@@ -432,6 +438,7 @@ function AssistantPage() {
   useEffect(() => {
     if (!user) return;
     loadChatSessions();
+    loadPatientSummary();
   }, [user?.id]);
 
   async function signIn(event) {
@@ -452,6 +459,7 @@ function AssistantPage() {
     if (!isSupabaseConfigured) return;
     await supabase.auth.signOut();
     setAuthNotice("");
+    setSummaryNotice("");
   }
 
   async function loadChatSessions() {
@@ -463,6 +471,16 @@ function AssistantPage() {
       .order("updated_at", { ascending: false });
     if (!error) setChatSessions(data || []);
     setHistoryLoading(false);
+  }
+
+  async function loadPatientSummary() {
+    if (!user) return;
+    const { data, error } = await supabase
+      .from("patient_summaries")
+      .select("*")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (!error) setPatientSummary(data || null);
   }
 
   async function ensureChatSession(firstText = "") {
@@ -491,8 +509,8 @@ function AssistantPage() {
   }
 
   async function saveChatMessage(sessionId, message) {
-    if (!user || !sessionId) return;
-    await supabase.from("chat_messages").insert({
+    if (!user || !sessionId) return false;
+    const { error } = await supabase.from("chat_messages").insert({
       session_id: sessionId,
       user_id: user.id,
       role: message.role,
@@ -504,11 +522,17 @@ function AssistantPage() {
         mode: activeMode,
       },
     });
+    if (error) {
+      setAuthNotice(error.message);
+      setSummaryNotice(`Chat save failed: ${error.message}`);
+      return false;
+    }
     await supabase
       .from("chat_sessions")
       .update({ mode: activeMode.toLowerCase() })
       .eq("id", sessionId);
     loadChatSessions();
+    return true;
   }
 
   async function loadSessionMessages(sessionId) {
@@ -533,8 +557,80 @@ function AssistantPage() {
           image_present: row.image_present,
         })),
       ]);
+      loadPatientSummary();
     }
     setHistoryLoading(false);
+  }
+
+  async function autoGeneratePatientSummary() {
+    if (!user || summaryLoading) return;
+    setSummaryLoading(true);
+    setSummaryNotice("Updating eye-health summary automatically...");
+
+    try {
+      const { data, error } = await supabase
+        .from("chat_messages")
+        .select("role,content,image_present,created_at,metadata")
+        .order("created_at", { ascending: false })
+        .limit(120);
+      if (error) throw error;
+
+      const rows = (data || []).reverse();
+      if (rows.length === 0) {
+        setSummaryNotice("");
+        return;
+      }
+
+      const response = await fetch("/summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: rows.map(row => ({
+            role: row.role,
+            content: row.content,
+            image_present: row.image_present,
+            created_at: row.created_at,
+          })),
+        }),
+      });
+      if (!response.ok) throw new Error("Summary generation failed");
+      const summary = await response.json();
+
+      const saved = {
+        user_id: user.id,
+        summary_text: summary.summary_text || "",
+        symptoms: Array.isArray(summary.symptoms) ? summary.symptoms : [],
+        topics: Array.isArray(summary.topics) ? summary.topics : [],
+        red_flags: Array.isArray(summary.red_flags) ? summary.red_flags : [],
+        image_history: Array.isArray(summary.image_history) ? summary.image_history : [],
+        recommended_next_steps: Array.isArray(summary.recommended_next_steps) ? summary.recommended_next_steps : [],
+        safety_note: summary.safety_note || "This is not a diagnosis. It summarizes user-reported information and AI screening-support outputs.",
+        last_generated_at: new Date().toISOString(),
+      };
+
+      const { data: upserted, error: upsertError } = await supabase
+        .from("patient_summaries")
+        .upsert(saved, { onConflict: "user_id" })
+        .select("*")
+        .single();
+      if (upsertError) throw upsertError;
+
+      setPatientSummary(upserted);
+      setSummaryNotice("Eye-health summary updated automatically.");
+    } catch (error) {
+      setSummaryNotice(error.message || "Could not update summary.");
+    } finally {
+      setSummaryLoading(false);
+    }
+  }
+
+  async function openSummaryModal() {
+    setSummaryOpen(true);
+    if (user && !patientSummary && !summaryLoading) {
+      await autoGeneratePatientSummary();
+    } else if (user) {
+      await loadPatientSummary();
+    }
   }
 
   function startNewChat() {
@@ -572,7 +668,7 @@ function AssistantPage() {
     };
 
     setMessages(prev => [...prev, userMessage]);
-    saveChatMessage(sessionId, userMessage);
+    const userSaved = await saveChatMessage(sessionId, userMessage);
     setText("");
     resetFile();
     setBusy(true);
@@ -583,11 +679,13 @@ function AssistantPage() {
       const data = await response.text();
       const assistantMessage = { role: "assistant", text: data, time: `${formatTime()} - OcuCare` };
       setMessages(prev => [...prev, assistantMessage]);
-      saveChatMessage(sessionId, assistantMessage);
+      const assistantSaved = await saveChatMessage(sessionId, assistantMessage);
+      if (userSaved && assistantSaved) await autoGeneratePatientSummary();
     } catch {
       const errorMessage = { role: "assistant", text: "We could not process your request. Please try again.", time: formatTime(), error: true };
       setMessages(prev => [...prev, errorMessage]);
-      saveChatMessage(sessionId, errorMessage);
+      const errorSaved = await saveChatMessage(sessionId, errorMessage);
+      if (userSaved && errorSaved) await autoGeneratePatientSummary();
     } finally {
       setBusy(false);
     }
@@ -638,7 +736,19 @@ function AssistantPage() {
               <Badge tone="blue"><Microscope size={14} /> OcuCare assistant</Badge>
               <h2 className="mt-2 text-2xl font-black text-slate-950">Patient guidance chat</h2>
             </div>
-            <Badge tone="teal">Research prototype</Badge>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {user && (
+                <button
+                  className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 text-sm font-black text-blue-800 hover:bg-blue-100"
+                  type="button"
+                  onClick={openSummaryModal}
+                >
+                  <Activity size={16} />
+                  Eye Health Summary
+                </button>
+              )}
+              <Badge tone="teal">Research prototype</Badge>
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto bg-slate-50 p-5">
@@ -728,6 +838,95 @@ function AssistantPage() {
           </Card>
         </aside>
       </main>
+      {summaryOpen && (
+        <SummaryModal
+          summary={patientSummary}
+          summaryLoading={summaryLoading}
+          summaryNotice={summaryNotice}
+          onClose={() => setSummaryOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function SummaryModal({ summary, summaryLoading, summaryNotice, onClose }) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4 backdrop-blur-sm">
+      <div className="max-h-[88vh] w-full max-w-3xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-6">
+          <div>
+            <Badge tone="blue"><Activity size={14} /> Automatic patient summary</Badge>
+            <h2 className="mt-3 text-2xl font-black text-slate-950">Eye Health Summary</h2>
+            <p className="mt-2 text-sm text-slate-600">Generated automatically from saved chats and screening-support outputs.</p>
+          </div>
+          <button className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50" type="button" onClick={onClose} aria-label="Close summary">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="max-h-[calc(88vh-128px)] overflow-y-auto p-6">
+          {summaryLoading && (
+            <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm font-medium text-blue-900">
+              Updating the latest summary automatically...
+            </div>
+          )}
+          {!summary && !summaryLoading && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+              <h3 className="text-lg font-black text-amber-950">No summary yet</h3>
+              <p className="mt-2 text-sm leading-6 text-amber-900">OcuCare will generate this automatically from saved logged-in chats. If you already chatted, wait a moment and reopen this panel.</p>
+            </div>
+          )}
+          {summary && (
+            <div className="space-y-5">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                <h3 className="text-lg font-black text-slate-950">Overview</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-700">{summary.summary_text}</p>
+                {summary.last_generated_at && (
+                  <p className="mt-3 text-xs font-medium text-slate-500">Last generated: {formatStoredTime(summary.last_generated_at)}</p>
+                )}
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <SummaryList title="Reported Symptoms" items={summary.symptoms} empty="No repeated symptoms identified yet." />
+                <SummaryList title="Topics Discussed" items={summary.topics} empty="No topics identified yet." />
+                <SummaryList title="Red Flags" items={summary.red_flags} empty="No urgent warning signs found in saved chats." urgent />
+                <SummaryList title="Image Screening History" items={summary.image_history} empty="No image-screening notes yet." />
+              </div>
+              <SummaryList title="Recommended Next Steps" items={summary.recommended_next_steps} empty="No next steps generated yet." wide />
+              <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-900">
+                <strong>Safety note: </strong>
+                {summary.safety_note || "This is not a diagnosis. It summarizes user-reported information and AI screening-support outputs."}
+              </div>
+            </div>
+          )}
+          {summaryNotice && (
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+              {summaryNotice}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SummaryList({ title, items, empty, urgent = false, wide = false }) {
+  const list = Array.isArray(items) ? items.filter(Boolean) : [];
+  return (
+    <div className={cn("rounded-2xl border p-5", urgent ? "border-red-200 bg-red-50" : "border-slate-200 bg-white", wide && "md:col-span-2")}>
+      <h3 className={cn("text-base font-black", urgent ? "text-red-950" : "text-slate-950")}>{title}</h3>
+      {list.length === 0 ? (
+        <p className="mt-2 text-sm leading-6 text-slate-500">{empty}</p>
+      ) : (
+        <ul className="mt-3 space-y-2">
+          {list.map((item, index) => (
+            <li className="flex gap-2 text-sm leading-6 text-slate-700" key={`${title}-${index}`}>
+              <CheckCircle2 className={urgent ? "mt-1 shrink-0 text-red-700" : "mt-1 shrink-0 text-teal-700"} size={15} />
+              <span>{String(item)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
