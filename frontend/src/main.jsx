@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -6,7 +6,6 @@ import {
   Activity,
   AlertTriangle,
   ArrowRight,
-  Bot,
   BrainCircuit,
   CheckCircle2,
   ChevronRight,
@@ -403,11 +402,6 @@ function AssistantPage() {
   const activeMode = file && text.trim() ? "Image + symptoms" : file ? "Image-only" : "Text-only";
   const user = authSession?.user || null;
 
-  const workflowList = useMemo(
-    () => ["Source-grounded education", "Class-limited image screening", "Image-text contradiction check", "Urgent symptom escalation"],
-    []
-  );
-
   function resetFile() {
     setFile(null);
     setPreview("");
@@ -694,91 +688,7 @@ function AssistantPage() {
   return (
     <div className="min-h-screen bg-slate-100">
       <Header assistant />
-      <main className="grid h-[calc(100vh-73px)] gap-4 p-4 lg:grid-cols-[310px_minmax(460px,1fr)_320px] lg:p-5">
-        <aside className="glass-panel overflow-y-auto rounded-3xl p-5">
-          <Badge tone="teal"><Bot size={14} /> Assistant online</Badge>
-          <h1 className="mt-5 text-3xl font-black leading-tight text-slate-950">Clinical support workspace</h1>
-          <p className="mt-3 text-sm leading-6 text-slate-600">A focused workspace for patient education, image-supported screening, and safety-aware next steps.</p>
-
-          <Card className="mt-6 border-teal-200 bg-teal-50 p-5">
-            <span className="text-xs font-black uppercase tracking-wide text-teal-800">Current mode</span>
-            <strong className="mt-2 block text-2xl font-black text-slate-950">{activeMode}</strong>
-            <p className="mt-2 text-sm text-slate-600">
-              {activeMode === "Image + symptoms"
-                ? "The system will compare image evidence with symptom text."
-                : activeMode === "Image-only"
-                  ? "The image model will be treated as screening evidence only."
-                  : "The assistant will answer as text-only educational triage."}
-            </p>
-          </Card>
-
-          <div className="mt-6">
-            <h2 className="text-sm font-black uppercase tracking-wide text-slate-500">Workflow coverage</h2>
-            <div className="mt-3 space-y-2">
-              {workflowList.map(item => (
-                <div key={item} className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-700">
-                  <CheckCircle2 className="text-teal-700" size={17} />
-                  {item}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
-            <div className="flex items-center gap-2 font-black"><AlertTriangle size={18} /> Emergency warning</div>
-            <p className="mt-2 leading-6">{urgentText}</p>
-          </div>
-        </aside>
-
-        <section className="flex min-h-0 flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/10">
-          <div className="flex items-start justify-between gap-5 border-b border-slate-200 px-5 py-4">
-            <div>
-              <Badge tone="blue"><Microscope size={14} /> OcuCare assistant</Badge>
-              <h2 className="mt-2 text-2xl font-black text-slate-950">Patient guidance chat</h2>
-            </div>
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              {user && (
-                <button
-                  className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 text-sm font-black text-blue-800 hover:bg-blue-100"
-                  type="button"
-                  onClick={openSummaryModal}
-                >
-                  <Activity size={16} />
-                  Eye Health Summary
-                </button>
-              )}
-              <Badge tone="teal">Research prototype</Badge>
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto bg-slate-50 p-5">
-            {messages.map((message, index) => <ChatMessage key={`${message.role}-${index}`} message={message} />)}
-            {busy && <TypingIndicator />}
-          </div>
-
-          {preview && (
-            <div className="flex items-center gap-3 border-t border-slate-200 bg-white px-5 py-3">
-              <img className="h-14 w-14 rounded-2xl object-cover ring-1 ring-slate-200" src={preview} alt="Selected eye upload preview" />
-              <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-600">{file?.name || "Image selected"}</span>
-              <button className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-red-700 hover:bg-red-50" type="button" onClick={resetFile}>
-                <X size={16} /> Remove
-              </button>
-            </div>
-          )}
-
-          <form className="border-t border-slate-200 bg-white p-4" onSubmit={submit}>
-            <p className="mb-3 text-sm font-medium text-red-800">{urgentText}</p>
-            <div className="flex gap-3">
-              <label className="relative grid h-12 w-12 shrink-0 cursor-pointer place-items-center rounded-2xl border border-slate-200 bg-white text-blue-700 transition hover:border-blue-300 hover:bg-blue-50" title="Upload eye image" aria-label="Upload eye image">
-                <Upload size={20} />
-                <input ref={fileInputRef} className="absolute inset-0 cursor-pointer opacity-0" type="file" accept="image/*" onChange={onFileChange} />
-              </label>
-              <input className="min-w-0 flex-1 rounded-2xl border border-slate-200 px-4 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100" value={text} onChange={event => setText(event.target.value)} placeholder="Describe symptoms or ask an eye-health question..." />
-              <button className="min-h-12 rounded-2xl bg-blue-700 px-5 text-sm font-black text-white shadow-lg shadow-blue-900/20 transition hover:bg-blue-800 disabled:opacity-60" type="submit" disabled={busy}>Send</button>
-            </div>
-          </form>
-        </section>
-
+      <main className="grid h-[calc(100vh-73px)] gap-4 p-4 lg:grid-cols-[340px_minmax(0,1fr)] lg:p-5">
         <aside className="space-y-4 overflow-y-auto">
           <AuthPanel
             user={user}
@@ -837,6 +747,56 @@ function AssistantPage() {
             <p className="mt-2 text-sm leading-6 text-amber-900">Outputs are not medical diagnosis. Keep limitations visible in demos and final presentation.</p>
           </Card>
         </aside>
+
+        <section className="flex min-h-0 flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/10">
+          <div className="flex items-start justify-between gap-5 border-b border-slate-200 px-5 py-4">
+            <div>
+              <Badge tone="blue"><Microscope size={14} /> OcuCare assistant</Badge>
+              <h2 className="mt-2 text-2xl font-black text-slate-950">Patient guidance chat</h2>
+            </div>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {user && (
+                <button
+                  className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 text-sm font-black text-blue-800 hover:bg-blue-100"
+                  type="button"
+                  onClick={openSummaryModal}
+                >
+                  <Activity size={16} />
+                  Eye Health Summary
+                </button>
+              )}
+              <Badge tone="teal">Research prototype</Badge>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto bg-slate-50 p-5">
+            {messages.map((message, index) => <ChatMessage key={`${message.role}-${index}`} message={message} />)}
+            {busy && <TypingIndicator />}
+          </div>
+
+          {preview && (
+            <div className="flex items-center gap-3 border-t border-slate-200 bg-white px-5 py-3">
+              <img className="h-14 w-14 rounded-2xl object-cover ring-1 ring-slate-200" src={preview} alt="Selected eye upload preview" />
+              <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-600">{file?.name || "Image selected"}</span>
+              <button className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-red-700 hover:bg-red-50" type="button" onClick={resetFile}>
+                <X size={16} /> Remove
+              </button>
+            </div>
+          )}
+
+          <form className="border-t border-slate-200 bg-white p-4" onSubmit={submit}>
+            <p className="mb-3 text-sm font-medium text-red-800">{urgentText}</p>
+            <div className="flex gap-3">
+              <label className="relative grid h-12 w-12 shrink-0 cursor-pointer place-items-center rounded-2xl border border-slate-200 bg-white text-blue-700 transition hover:border-blue-300 hover:bg-blue-50" title="Upload eye image" aria-label="Upload eye image">
+                <Upload size={20} />
+                <input ref={fileInputRef} className="absolute inset-0 cursor-pointer opacity-0" type="file" accept="image/*" onChange={onFileChange} />
+              </label>
+              <input className="min-w-0 flex-1 rounded-2xl border border-slate-200 px-4 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100" value={text} onChange={event => setText(event.target.value)} placeholder="Describe symptoms or ask an eye-health question..." />
+              <button className="min-h-12 rounded-2xl bg-blue-700 px-5 text-sm font-black text-white shadow-lg shadow-blue-900/20 transition hover:bg-blue-800 disabled:opacity-60" type="submit" disabled={busy}>Send</button>
+            </div>
+          </form>
+        </section>
+
       </main>
       {summaryOpen && (
         <SummaryModal

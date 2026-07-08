@@ -78,6 +78,25 @@ except Exception as e:
         return {"diagnosis": "Fusion model unavailable", "confidence": 0.0}
 
 try:
+    from src.image_filter import assess_image_eligibility, image_filter_rejection_message
+    print("[OK] Image eligibility filter loaded.")
+except Exception as e:
+    print(f"[WARN] Image eligibility filter unavailable: {e}")
+    traceback.print_exc()
+
+    def assess_image_eligibility(image_path):
+        class _Result:
+            allowed = True
+            status = "filter_unavailable"
+            reason = "Image filter unavailable."
+            score = 1.0
+            details = {}
+        return _Result()
+
+    def image_filter_rejection_message(result):
+        return "The uploaded image could not be validated for retinal/fundus screening."
+
+try:
     from src.web_tool import (
         format_web_evidence_for_prompt,
         format_web_evidence_for_response,
@@ -687,6 +706,14 @@ def chat():
         os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         image_file.save(filepath)
+
+        eligibility = assess_image_eligibility(filepath)
+        print(
+            f"[ImageFilter] status={eligibility.status}, "
+            f"allowed={eligibility.allowed}, score={eligibility.score}, details={eligibility.details}"
+        )
+        if not eligibility.allowed:
+            return image_filter_rejection_message(eligibility)
 
         if msg:
             # Image + Text -> cross-check image-only evidence against fusion.
