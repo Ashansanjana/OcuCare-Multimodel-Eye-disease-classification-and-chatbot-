@@ -97,6 +97,25 @@ except Exception as e:
         return "The uploaded image could not be validated for retinal/fundus screening."
 
 try:
+    from src.fundus_feature_filter import assess_fundus_feature_profile, fundus_feature_rejection_message
+    print("[OK] Fundus feature profile filter loaded.")
+except Exception as e:
+    print(f"[WARN] Fundus feature profile filter unavailable: {e}")
+    traceback.print_exc()
+
+    def assess_fundus_feature_profile(image_path):
+        class _Result:
+            allowed = True
+            status = "feature_filter_unavailable"
+            reason = "Fundus feature profile filter unavailable."
+            score = 1.0
+            details = {}
+        return _Result()
+
+    def fundus_feature_rejection_message(result):
+        return "The uploaded image is outside the accepted retinal/fundus image feature profile."
+
+try:
     from src.web_tool import (
         format_web_evidence_for_prompt,
         format_web_evidence_for_response,
@@ -714,6 +733,15 @@ def chat():
         )
         if not eligibility.allowed:
             return image_filter_rejection_message(eligibility)
+
+        feature_eligibility = assess_fundus_feature_profile(filepath)
+        print(
+            f"[FundusFeatureFilter] status={feature_eligibility.status}, "
+            f"allowed={feature_eligibility.allowed}, score={feature_eligibility.score}, "
+            f"details={feature_eligibility.details}"
+        )
+        if not feature_eligibility.allowed:
+            return fundus_feature_rejection_message(feature_eligibility)
 
         if msg:
             # Image + Text -> cross-check image-only evidence against fusion.

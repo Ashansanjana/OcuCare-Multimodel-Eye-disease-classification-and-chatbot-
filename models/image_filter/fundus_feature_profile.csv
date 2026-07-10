@@ -1,0 +1,25 @@
+path,used,status,reason
+data\uploads\0_4015166.jpg,True,accepted,The uploaded image passed basic quality and retinal/fundus eligibility checks.
+data\uploads\0_4517448.jpg,True,accepted,The uploaded image passed basic quality and retinal/fundus eligibility checks.
+data\uploads\100_left.jpeg,True,accepted,The uploaded image passed basic quality and retinal/fundus eligibility checks.
+data\uploads\100_right.jpeg,True,accepted,The uploaded image passed basic quality and retinal/fundus eligibility checks.
+data\uploads\1020_left.jpg,True,accepted,The uploaded image passed basic quality and retinal/fundus eligibility checks.
+data\uploads\102_left.jpeg,True,accepted,The uploaded image passed basic quality and retinal/fundus eligibility checks.
+data\uploads\102_right.jpeg,True,accepted,The uploaded image passed basic quality and retinal/fundus eligibility checks.
+data\uploads\103_left.jpg,True,accepted,The uploaded image passed basic quality and retinal/fundus eligibility checks.
+data\uploads\10_2555943.jpg,True,accepted,The uploaded image passed basic quality and retinal/fundus eligibility checks.
+data\uploads\111_right.jpeg,True,accepted,The uploaded image passed basic quality and retinal/fundus eligibility checks.
+data\uploads\117_right.jpeg,True,accepted,The uploaded image passed basic quality and retinal/fundus eligibility checks.
+data\uploads\119_left.jpeg,True,accepted,The uploaded image passed basic quality and retinal/fundus eligibility checks.
+data\uploads\119_right.jpeg,True,accepted,The uploaded image passed basic quality and retinal/fundus eligibility checks.
+data\uploads\122_left.jpeg,True,accepted,The uploaded image passed basic quality and retinal/fundus eligibility checks.
+data\uploads\1_4540560.jpg,False,too_dark,The image is too dark for reliable screening.
+data\uploads\1_5346540.jpg,True,accepted,The uploaded image passed basic quality and retinal/fundus eligibility checks.
+data\uploads\1_7703314.jpg,True,accepted,The uploaded image passed basic quality and retinal/fundus eligibility checks.
+data\uploads\2_5194189.jpg,True,accepted,The uploaded image passed basic quality and retinal/fundus eligibility checks.
+data\uploads\2_8900343.jpg,True,accepted,The uploaded image passed basic quality and retinal/fundus eligibility checks.
+data\uploads\6_6261868.jpg,True,accepted,The uploaded image passed basic quality and retinal/fundus eligibility checks.
+data\uploads\8_right.jpg,True,accepted,The uploaded image passed basic quality and retinal/fundus eligibility checks.
+data\uploads\951_left.jpg,True,accepted,The uploaded image passed basic quality and retinal/fundus eligibility checks.
+data\uploads\udara.jpg,True,accepted,The uploaded image passed basic quality and retinal/fundus eligibility checks.
+data\uploads\upload_test.jpg,False,low_resolution,The image is too small for retinal screening (64x64).

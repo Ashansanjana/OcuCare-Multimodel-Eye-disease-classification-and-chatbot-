@@ -51,6 +51,7 @@ num_classes = len(DIAGNOSIS_MAP)
 # Lazy model cache
 # 
 _cnn_model       = None   # Keras CNN
+_cnn_feature_model = None # Keras feature extractor from CNN penultimate layer
 _inception_model = None   # InceptionV3 feature extractor
 _fusion_model    = None   # PyTorch FusionClassifier
 _tokenizer       = None   # BERT tokenizer
@@ -106,6 +107,26 @@ def _load_cnn():
         _cnn_model = keras.models.load_model(CNN_MODEL_PATH)
         print("[inference]  CNN model loaded.")
     return _cnn_model
+
+
+def _load_cnn_feature_model():
+    global _cnn_feature_model
+    if _cnn_feature_model is None:
+        os.environ.setdefault("KERAS_BACKEND", "tensorflow")
+        from tensorflow import keras
+
+        model = _load_cnn()
+        if len(model.layers) < 2:
+            raise ValueError("CNN model does not have enough layers for feature extraction.")
+
+        feature_layer = model.layers[-2]
+        _cnn_feature_model = keras.Model(
+            inputs=model.input,
+            outputs=feature_layer.output,
+            name="ocucare_cnn_feature_extractor",
+        )
+        print(f"[inference] CNN feature extractor ready from layer '{feature_layer.name}'.")
+    return _cnn_feature_model
 
 
 def _load_inception():
@@ -220,6 +241,24 @@ def predict_cnn(image_path: str) -> dict:
         if len(err_msg) > 200:
             err_msg = err_msg[:200] + "..."
         return {"diagnosis": f"CNN Error: {err_msg}", "confidence": 0.0}
+
+
+def extract_cnn_embedding(image_path: str):
+    """
+    Extract a feature vector from the existing CNN disease model before its final
+    classifier layer. This is used for fundus in-distribution/profile matching,
+    not for disease prediction.
+    """
+    import numpy as np
+
+    feature_model = _load_cnn_feature_model()
+    img_array = preprocess_image(image_path)
+    embedding = feature_model.predict(img_array, verbose=0)[0]
+    embedding = np.asarray(embedding, dtype=np.float32).reshape(-1)
+    norm = float(np.linalg.norm(embedding))
+    if norm > 0:
+        embedding = embedding / norm
+    return embedding
 
 
 def predict_fusion(image_path: str, caption: str) -> dict:

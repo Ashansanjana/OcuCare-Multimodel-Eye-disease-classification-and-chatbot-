@@ -9,10 +9,12 @@ SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 MIN_WIDTH = 180
 MIN_HEIGHT = 180
 MIN_SHARPNESS = 18.0
+MAX_SHARPNESS = 6000.0
 MIN_BRIGHTNESS = 22.0
 MAX_BRIGHTNESS = 235.0
 MIN_CONTRAST = 14.0
 MIN_FUNDUS_SCORE = 0.58
+MIN_VESSEL_TEXTURE_SCORE = 0.12
 
 
 @dataclass
@@ -68,9 +70,23 @@ def assess_image_eligibility(image_path: str) -> ImageEligibilityResult:
         return _reject("low_contrast", "The image has too little contrast for reliable screening.", 0.2, quality_details)
     if sharpness < MIN_SHARPNESS:
         return _reject("blurry_image", "The image appears too blurry for reliable screening.", 0.25, quality_details)
+    if sharpness > MAX_SHARPNESS:
+        return _reject(
+            "excessive_noise_or_artifacts",
+            "The image has excessive noise, compression artifacts, or non-medical texture patterns.",
+            0.25,
+            quality_details,
+        )
 
     fundus_score, fundus_details = _fundus_likeness_score(arr)
     details = {**quality_details, **fundus_details}
+    if fundus_details["vessel_texture_score"] < MIN_VESSEL_TEXTURE_SCORE:
+        return _reject(
+            "no_retinal_vessel_pattern",
+            "The image does not show enough retinal vessel-like texture for supported fundus screening.",
+            fundus_score,
+            details,
+        )
     if fundus_score < MIN_FUNDUS_SCORE:
         return _reject(
             "not_fundus_scan",

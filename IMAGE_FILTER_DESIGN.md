@@ -26,6 +26,37 @@ app.py -> /get image upload path -> assess_image_eligibility(filepath)
 
 The image reaches `predict_cnn()` or `predict_fusion()` only when the filter returns `allowed=True`.
 
+## No-Training Feature Profile Upgrade
+
+OcuCare also supports a stronger no-training filter:
+
+```text
+src/fundus_feature_filter.py
+tools/build_fundus_feature_profile.py
+```
+
+This profile filter reuses the existing CNN model as a feature extractor. It builds a saved profile from known valid fundus images and then compares each new upload against that profile before disease inference.
+
+Build the profile:
+
+```bash
+python tools/build_fundus_feature_profile.py --input data/fundus_profile_source
+```
+
+Quick test with existing uploaded fundus images:
+
+```bash
+python tools/build_fundus_feature_profile.py --input data/uploads --max-images 300
+```
+
+Saved profile:
+
+```text
+models/image_filter/fundus_feature_profile.npz
+```
+
+If this file exists, the backend automatically applies the feature-distance filter after the rule-based checks.
+
 ## Checks
 
 1. File type and readability
