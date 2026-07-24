@@ -116,6 +116,32 @@ except Exception as e:
         return "The uploaded image is outside the accepted retinal/fundus image feature profile."
 
 try:
+    from src.gemini_image_filter import (
+        assess_with_gemini_image_check,
+        gemini_image_rejection_message,
+        is_gemini_image_check_enabled,
+    )
+    print("[OK] Gemini image check filter loaded.")
+except Exception as e:
+    print(f"[WARN] Gemini image check filter unavailable: {e}")
+    traceback.print_exc()
+
+    def is_gemini_image_check_enabled():
+        return False
+
+    def assess_with_gemini_image_check(image_path):
+        class _Result:
+            allowed = True
+            status = "gemini_image_check_unavailable"
+            reason = "Gemini image check unavailable."
+            confidence = 1.0
+            details = {}
+        return _Result()
+
+    def gemini_image_rejection_message(result):
+        return "The uploaded image was not confirmed as a retinal/fundus scan."
+
+try:
     from src.web_tool import (
         format_web_evidence_for_prompt,
         format_web_evidence_for_response,
@@ -699,6 +725,7 @@ def health():
         "chatModel": chatModel is not None,
         "rag_chain": rag_chain is not None,
         "trusted_web_evidence": is_web_evidence_configured(),
+        "gemini_image_check": is_gemini_image_check_enabled(),
     }
 
 
@@ -805,6 +832,15 @@ def chat():
         )
         if not feature_eligibility.allowed:
             return fundus_feature_rejection_message(feature_eligibility)
+
+        gemini_eligibility = assess_with_gemini_image_check(filepath)
+        print(
+            f"[GeminiImageCheck] status={gemini_eligibility.status}, "
+            f"allowed={gemini_eligibility.allowed}, confidence={gemini_eligibility.confidence}, "
+            f"details={gemini_eligibility.details}"
+        )
+        if not gemini_eligibility.allowed:
+            return gemini_image_rejection_message(gemini_eligibility)
 
         if msg:
             # Image + Text -> cross-check image-only evidence against fusion.
