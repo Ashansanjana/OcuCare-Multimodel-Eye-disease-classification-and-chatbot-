@@ -738,7 +738,7 @@ function AssistantPage() {
           </Card>
           <Card className="p-5">
             <h2 className="text-lg font-black text-slate-950">Response review</h2>
-            <ReviewItem icon={FileSearch} label="Evidence/context visible" />
+            <ReviewItem icon={FileSearch} label="Patient-facing report view" />
             <ReviewItem icon={AlertTriangle} label="Red flags separated" />
             <ReviewItem icon={Stethoscope} label="Next step clearly stated" />
           </Card>
@@ -961,29 +961,167 @@ function ChatMessage({ message }) {
 }
 
 function StructuredResponse({ text }) {
-  const sections = parseResponse(text);
+  const sections = dedupeSections(
+    parseResponse(text).filter(section => !["evidence", "hidden"].includes(section.kind))
+  );
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {sections.map((section, index) => (
         <section className={sectionClass(section.kind)} key={`${section.title}-${index}`}>
-          {section.title && <h3 className="mb-1 text-sm font-black text-slate-950">{displayTitle(section.title)}</h3>}
-          <p className="whitespace-pre-wrap text-sm leading-6 text-slate-600">{section.body}</p>
+          {section.title && <h3 className="mb-3 text-[13px] font-black uppercase tracking-wide text-slate-900">{displayTitle(section.title)}</h3>}
+          <FormattedBody text={section.body} />
         </section>
       ))}
     </div>
   );
 }
 
+function dedupeSections(sections) {
+  const seen = new Set();
+  return sections.filter(section => {
+    const key = displayTitle(section.title).toLowerCase();
+    if (key !== "possible explanation") return true;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function sectionClass(kind) {
   return cn(
-    "rounded-2xl border border-l-4 p-3",
+    "rounded-2xl border border-l-4 p-4",
     kind === "urgent" && "border-red-200 border-l-red-600 bg-red-50",
     kind === "warning" && "border-amber-200 border-l-amber-600 bg-amber-50",
-    kind === "evidence" && "border-teal-200 border-l-teal-600 bg-teal-50",
+    kind === "triage" && "border-slate-200 border-l-slate-500 bg-slate-50",
     kind === "recommendation" && "border-blue-200 border-l-blue-600 bg-blue-50",
     kind === "screening" && "border-blue-200 border-l-blue-600 bg-blue-50",
     kind === "default" && "border-slate-200 border-l-slate-400 bg-white"
   );
+}
+
+function FormattedBody({ text }) {
+  const blocks = bodyBlocks(text);
+  if (blocks.length === 0) return null;
+
+  return (
+    <div className="space-y-3 text-sm leading-6 text-slate-700">
+      {blocks.map((block, index) => {
+        if (block.type === "list") {
+          return (
+            <ul className="space-y-2" key={index}>
+              {block.items.map((item, itemIndex) => (
+                <li className={cn("text-slate-700", isListSubheading(item) ? "mt-3 first:mt-0" : "flex gap-2")} key={`${index}-${itemIndex}`}>
+                  {isListSubheading(item) ? (
+                    <span className="block text-xs font-black uppercase tracking-wide text-slate-800">{cleanInlineText(item).replace(/:$/, "")}</span>
+                  ) : (
+                    <>
+                      <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
+                      <span>{cleanInlineText(item)}</span>
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+          );
+        }
+
+        if (block.type === "facts") {
+          return (
+            <dl className="space-y-2" key={index}>
+              {block.items.map((item, itemIndex) => (
+                <div className="rounded-xl border border-slate-200 bg-white/70 px-3 py-2" key={`${index}-${itemIndex}`}>
+                  <dt className="text-xs font-black uppercase tracking-wide text-slate-500">{item.label}</dt>
+                  <dd className="mt-0.5 text-sm font-medium text-slate-800">{cleanInlineText(item.value)}</dd>
+                </div>
+              ))}
+            </dl>
+          );
+        }
+
+        return (
+          <p className="text-sm leading-6 text-slate-700" key={index}>
+            {cleanInlineText(block.text)}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function bodyBlocks(value) {
+  const lines = String(value || "")
+    .split("\n")
+    .map(line => line.trim())
+    .filter(Boolean);
+  const blocks = [];
+  let paragraph = [];
+  let list = [];
+  let facts = [];
+
+  function flushParagraph() {
+    if (paragraph.length) {
+      blocks.push({ type: "paragraph", text: paragraph.join(" ") });
+      paragraph = [];
+    }
+  }
+
+  function flushList() {
+    if (list.length) {
+      blocks.push({ type: "list", items: list });
+      list = [];
+    }
+  }
+
+  function flushFacts() {
+    if (facts.length) {
+      blocks.push({ type: "facts", items: facts });
+      facts = [];
+    }
+  }
+
+  lines.forEach(line => {
+    const bullet = line.match(/^[-*•]\s+(.+)$/) || line.match(/^\d+\.\s+(.+)$/);
+    const fact = line.match(/^([A-Za-z][A-Za-z\s/+()-]{2,42}):\s+(.+)$/);
+
+    if (bullet) {
+      flushParagraph();
+      flushFacts();
+      list.push(bullet[1]);
+      return;
+    }
+
+    if (fact && !line.toLowerCase().startsWith("reason:")) {
+      flushParagraph();
+      flushList();
+      facts.push({ label: fact[1], value: fact[2] });
+      return;
+    }
+
+    flushList();
+    flushFacts();
+    paragraph.push(line);
+  });
+
+  flushParagraph();
+  flushList();
+  flushFacts();
+  return blocks;
+}
+
+function legacyCleanInlineText(value) {
+  return String(value || "")
+    .replace(/\*\*/g, "")
+    .replace(/\s*\[\d+\]/g, "")
+    .replace(/\s*\{\d+\}/g, "")
+    .replace(/\s*\(\s*\d+\s*\)/g, "")
+    .replace(/^\s*[-*•]\s+/, "")
+    .replace(/\s+([.,;:])/g, "$1")
+    .trim();
+}
+
+function isListSubheading(value) {
+  const text = cleanInlineText(value);
+  return /^[A-Za-z][A-Za-z\s/+()-]{2,42}:$/.test(text);
 }
 
 function TypingIndicator() {
@@ -1003,17 +1141,22 @@ const knownTitles = [
   "OcuAI Screening Support Result",
   "OcuAI Screening Support Report",
   "Text-only triage mode",
-  "Screening Status:",
-  "Reason:",
-  "Reported Symptoms:",
-  "Image-only model evidence:",
-  "Image + symptom fusion evidence:",
-  "Recommended action:",
+  "Screening Status",
+  "Reason",
+  "Image-text consistency note",
+  "Patient-facing result",
+  "Input note",
+  "Internal screening note",
+  "Reported Symptoms",
+  "Image-only model evidence",
+  "Image + symptom fusion evidence",
+  "Recommended action",
   "Knowledge Base Evidence",
   "Retrieved passages used for source-grounded answering:",
-  "AI Screening Impression:",
-  "Model Score:",
-  "Analysis Method:",
+  "Trusted Web Evidence",
+  "AI Screening Impression",
+  "Model Score",
+  "Analysis Method",
   "What This Condition Means",
   "Why The Model May Have Predicted This",
   "Common Symptoms",
@@ -1031,8 +1174,8 @@ function parseResponse(value) {
   let body = [];
 
   function push() {
-    const text = body.join("\n").trim();
-    if (title || text) sections.push({ title, body: text, kind: classify(title, text) });
+    const normalized = normalizeSection(title, body.join("\n").trim());
+    if (normalized.title || normalized.body) sections.push(normalized);
     title = "";
     body = [];
   }
@@ -1046,7 +1189,9 @@ function parseResponse(value) {
     const detected = knownTitles.find(item => clean.startsWith(item));
     if (detected) {
       push();
-      title = line.trim();
+      title = detected;
+      const remainder = clean.slice(detected.length).replace(/^:\s*/, "").trim();
+      if (remainder) body.push(remainder);
     } else {
       body.push(line);
     }
@@ -1055,25 +1200,96 @@ function parseResponse(value) {
   return sections.length ? sections : [{ title: "", body: String(value || ""), kind: "default" }];
 }
 
+function normalizeSection(title, body) {
+  const kind = classify(title, body);
+  if (kind === "hidden" || kind === "evidence") return { title, body: "", kind };
+  if (!body && title && shouldHideEmptyTitle(title)) return { title, body: "", kind: "hidden" };
+  if (kind === "triage") {
+    return {
+      title,
+      body: summarizeTriageBody(body),
+      kind,
+    };
+  }
+  return { title, body, kind };
+}
+
+function shouldHideEmptyTitle(title) {
+  const lower = String(title || "").toLowerCase();
+  return lower.includes("ocuai screening support result") || lower.includes("screening status");
+}
+
 function classify(title, body) {
+  const titleText = String(title || "").toLowerCase();
   const text = `${title}\n${body}`.toLowerCase();
+  if (
+    titleText.includes("ocuai screening support report")
+    || titleText.includes("ai screening impression")
+    || titleText.includes("model score")
+    || titleText.includes("analysis method")
+    || titleText.includes("reported symptoms")
+    || titleText.includes("image-only model evidence")
+    || titleText.includes("image + symptom fusion evidence")
+    || titleText.includes("input note")
+    || titleText.includes("internal screening note")
+  ) return "hidden";
+  if (titleText.includes("text-only triage mode")) return "triage";
+  if (
+    titleText.includes("knowledge base evidence")
+    || titleText.includes("retrieved passages")
+    || titleText.includes("trusted web evidence")
+    || titleText.includes("knowledge base context")
+    || titleText.includes("evidence/context")
+  ) return "evidence";
   if (text.includes("urgent") || text.includes("emergency") || text.includes("red-flag")) return "urgent";
+  if (titleText.includes("image-text consistency note")) return "warning";
   if (text.includes("uncertain") || text.includes("unsupported") || text.includes("conflict") || text.includes("disagree")) return "warning";
-  if (text.includes("knowledge base evidence") || text.includes("retrieved passages") || text.includes("source:")) return "evidence";
+  if (text.includes("knowledge base evidence") || text.includes("retrieved passages") || text.includes("trusted web evidence") || text.includes("source:")) return "evidence";
   if (text.includes("recommended action") || text.includes("clinical recommendation") || text.includes("ophthalmologist") || text.includes("triage")) return "recommendation";
-  if (text.includes("screening status") || text.includes("screening impression") || text.includes("model score")) return "screening";
+  if (text.includes("screening status")) return "screening";
   return "default";
 }
 
 function displayTitle(title) {
-  const clean = String(title || "").replace(/:$/, "");
+  const clean = cleanInlineText(String(title || "").replace(/^\d+\.\s*/, "")).replace(/:$/, "");
   const lower = clean.toLowerCase();
+  if (lower.includes("text-only triage mode")) return "Text-only guidance";
   if (lower.includes("screening status") || lower.includes("screening impression")) return "Screening impression";
   if (lower.includes("reason") || lower.includes("what this condition means") || lower.includes("why the model")) return "Possible explanation";
   if (lower.includes("urgent") || lower.includes("red-flag")) return "Red flags";
-  if (lower.includes("recommended") || lower.includes("triage") || lower.includes("clinical recommendation")) return "Recommended next step";
+  if (lower.includes("recommended") || lower.includes("clinical recommendation")) return "Recommended next step";
   if (lower.includes("knowledge base") || lower.includes("retrieved passages") || lower.includes("context")) return "Evidence/context";
   return clean;
+}
+
+function summarizeTriageBody(body) {
+  const text = String(body || "");
+  const urgencyLine = text
+    .split("\n")
+    .map(line => line.trim())
+    .find(line => line.toLowerCase().startsWith("urgency flag:"));
+
+  const lines = ["No eye image was uploaded. This answer is educational guidance, not a diagnosis."];
+  if (urgencyLine) {
+    lines.push(urgencyLine.replace("Urgency flag:", "Urgency:"));
+  }
+  return lines.join("\n");
+}
+
+function stripVisibleNumbers(value) {
+  return String(value || "")
+    .replace(/\b\d+\.\s+/g, "")
+    .replace(/\s*\[\d+\]/g, "")
+    .replace(/\s*\{\d+\}/g, "")
+    .replace(/\s*\(\s*\d+\s*\)/g, "");
+}
+
+function cleanInlineText(value) {
+  return stripVisibleNumbers(value)
+    .replace(/\*\*/g, "")
+    .replace(/^\s*[-*•]\s+/, "")
+    .replace(/\s+([.,;:])/g, "$1")
+    .trim();
 }
 
 function formatTime() {

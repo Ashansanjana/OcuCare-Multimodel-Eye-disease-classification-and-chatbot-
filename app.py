@@ -284,6 +284,26 @@ def _has_urgent_symptom_text(text: str) -> bool:
     return any(term in msg for term in URGENT_SYMPTOM_TERMS)
 
 
+def _looks_like_general_question(text: str) -> bool:
+    msg = (text or "").strip().lower()
+    if not msg:
+        return False
+    question_starters = (
+        "what ", "what's ", "what are", "how ", "why ", "when ", "where ",
+        "can you", "could you", "tell me", "explain", "describe", "give me",
+        "list ", "do you know", "is glaucoma", "are there",
+    )
+    education_terms = (
+        "symptom", "symptoms", "treatment", "treatments", "cause", "causes",
+        "risk", "risks", "prevention", "diagnosis", "medicine", "medications",
+        "surgery", "glaucoma", "cataract", "diabetic retinopathy",
+    )
+    return msg.endswith("?") or (
+        any(msg.startswith(item) for item in question_starters)
+        and any(term in msg for term in education_terms)
+    )
+
+
 def _uncertainty_reasons(result: dict) -> list:
     reasons = []
     confidence = float(result.get("confidence", 0.0))
@@ -382,6 +402,49 @@ def _uncertain_screening_response(reason: str, image_result: dict = None,
         "- Use a valid medical eye image such as a fundus/retinal scan when image screening is required.",
         "- If symptoms are sudden, severe, painful, or involve vision loss, seek urgent ophthalmology care.",
         "- For non-urgent symptoms, consult a licensed eye-care professional for an in-person evaluation.",
+    ])
+    return "\n".join(lines)
+
+
+def _multimodal_mismatch_response(consistency: dict, symptoms: str = "") -> str:
+    lines = [
+        "Image-text consistency note",
+        "",
+        "Possible explanation:",
+        (
+            "The fundus image and the symptom text point toward different screening impressions. "
+            "This can happen when the typed description is incomplete, unrelated to the uploaded scan, "
+            "or when the image-only and multimodal models focus on different signals."
+        ),
+        "",
+        "Patient-facing result:",
+        (
+            "OcuCare cannot safely combine these two inputs into one confident screening impression. "
+            "The image should be reviewed with the correct symptom history by a licensed eye-care professional."
+        ),
+        "",
+        "Recommended action:",
+        "- Check that the uploaded image belongs to the same patient and same eye-health concern.",
+        "- Rewrite the text as actual symptoms, not a disease name or general question.",
+        "- If symptoms are sudden, painful, or involve vision loss, seek urgent eye-care evaluation.",
+        "- Otherwise, use this as preparation for an ophthalmologist or optometrist visit.",
+    ]
+
+    if symptoms:
+        lines.extend([
+            "",
+            "Input note:",
+            f"Text provided: {symptoms}",
+        ])
+
+    lines.extend([
+        "",
+        "Internal screening note:",
+        (
+            f"Image-only screening suggested {consistency['image_label']} "
+            f"({consistency['image_confidence']:.1%}), while image+text fusion suggested "
+            f"{consistency['fusion_label']} ({consistency['fusion_confidence']:.1%})."
+        ),
     ])
     return "\n".join(lines)
 
@@ -746,6 +809,18 @@ def chat():
         if msg:
             # Image + Text -> cross-check image-only evidence against fusion.
             try:
+                if _looks_like_general_question(msg):
+                    return (
+                        "Text question detected with an uploaded image\n\n"
+                        "Your text looks like a general eye-health question, not a patient symptom description. "
+                        "OcuCare did not send this question into the multimodal fusion model because that model expects symptom text paired with a fundus image.\n\n"
+                        "To test multimodal mode, upload a fundus image and write a symptom statement such as:\n"
+                        "- I have blurry vision and trouble seeing at night.\n"
+                        "- I have gradual side vision loss and eye pressure.\n"
+                        "- I have diabetes and my vision is getting blurry.\n\n"
+                        "For general questions like this, use text-only chat without uploading an image."
+                    )
+
                 image_res = predict_cnn(filepath)
                 if image_res['diagnosis'].startswith("CNN Error"):
                     return f"⚠️ CNN inference error: {image_res['diagnosis']}"
@@ -755,6 +830,12 @@ def chat():
                     return f"⚠️ Fusion inference error: {fusion_res['diagnosis']}"
 
                 consistency = _assess_multimodal_consistency(image_res, fusion_res)
+                print(
+                    "[Multimodal] "
+                    f"CNN={image_res.get('diagnosis')} ({float(image_res.get('confidence', 0.0)):.1%}) "
+                    f"Fusion={fusion_res.get('diagnosis')} ({float(fusion_res.get('confidence', 0.0)):.1%}) "
+                    f"Consistency={consistency['status']}"
+                )
                 if _has_urgent_symptom_text(msg):
                     reason = (
                         "Urgent symptom text was reported. Emergency red-flag symptoms should not be overridden "
@@ -771,7 +852,10 @@ def chat():
                         symptoms=msg,
                     )
 
-                if consistency["status"] != "agreement" or _is_uncertain(fusion_res) or _is_uncertain(image_res):
+                if consistency["status"] == "conflict":
+                    return _multimodal_mismatch_response(consistency, symptoms=msg)
+
+                if _is_uncertain(fusion_res):
                     uncertainty_bits = []
                     image_uncertainty = "; ".join(_uncertainty_reasons(image_res))
                     fusion_uncertainty = "; ".join(_uncertainty_reasons(fusion_res))
@@ -795,11 +879,20 @@ def chat():
                         symptoms=msg,
                     )
 
-                symptoms_with_crosscheck = (
-                    f"{msg}\n"
-                    f"Image-only cross-check agreed: {image_res['diagnosis']} "
-                    f"({image_res['confidence']:.1%})."
-                )
+                if consistency["status"] == "agreement":
+                    crosscheck_note = (
+                        f"Image-only cross-check agreed: {image_res['diagnosis']} "
+                        f"({image_res['confidence']:.1%})."
+                    )
+                else:
+                    crosscheck_note = (
+                        "Image-only cross-check did not exactly match the symptom-fusion result, "
+                        "but the disagreement was not strong enough to block screening support. "
+                        f"Image-only result: {image_res['diagnosis']} ({image_res['confidence']:.1%}); "
+                        f"fusion result: {fusion_res['diagnosis']} ({fusion_res['confidence']:.1%})."
+                    )
+
+                symptoms_with_crosscheck = f"{msg}\n{crosscheck_note}"
                 return _explain_diagnosis(
                     diagnosis=fusion_res['diagnosis'],
                     confidence=fusion_res['confidence'],
