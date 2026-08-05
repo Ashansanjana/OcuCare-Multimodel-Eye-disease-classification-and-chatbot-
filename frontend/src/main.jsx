@@ -17,6 +17,7 @@ import {
   MessageSquareText,
   Microscope,
   PhoneCall,
+  RefreshCw,
   ShieldAlert,
   Sparkles,
   Stethoscope,
@@ -502,7 +503,7 @@ function AssistantPage() {
     return data.id;
   }
 
-  async function saveChatMessage(sessionId, message) {
+  async function saveChatMessage(sessionId, message, clinicalMetadata = {}) {
     if (!user || !sessionId) return false;
     const { error } = await supabase.from("chat_messages").insert({
       session_id: sessionId,
@@ -513,7 +514,8 @@ function AssistantPage() {
       image_present: Boolean(message.image),
       metadata: {
         client_time: message.time,
-        mode: activeMode,
+        mode: clinicalMetadata.mode || activeMode,
+        ...clinicalMetadata,
       },
     });
     if (error) {
@@ -565,30 +567,40 @@ function AssistantPage() {
       const { data, error } = await supabase
         .from("chat_messages")
         .select("role,content,image_present,created_at,metadata")
+        .eq("user_id", user.id)
         .order("created_at", { ascending: false })
-        .limit(120);
+        .limit(300);
       if (error) throw error;
 
-      const rows = (data || []).reverse();
+      const rows = (data || [])
+        .reverse()
+        .filter(isSummaryEligibleRow)
+        .slice(-120);
       if (rows.length === 0) {
-        setSummaryNotice("");
+        setSummaryNotice("No clinically important saved information is available for a summary yet.");
         return;
       }
 
-      const response = await fetch("/summary", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: rows.map(row => ({
-            role: row.role,
-            content: row.content,
-            image_present: row.image_present,
-            created_at: row.created_at,
-          })),
-        }),
-      });
-      if (!response.ok) throw new Error("Summary generation failed");
-      const summary = await response.json();
+      let rawSummary;
+      const summaryController = new AbortController();
+      const summaryTimeout = window.setTimeout(() => summaryController.abort(), 25000);
+      try {
+        const response = await fetch("/summary", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: rows.map(toSummaryMessage),
+          }),
+          signal: summaryController.signal,
+        });
+        if (!response.ok) throw new Error("Summary generation failed");
+        rawSummary = await response.json();
+      } catch {
+        rawSummary = { generation_status: "fallback" };
+      } finally {
+        window.clearTimeout(summaryTimeout);
+      }
+      const summary = enrichFallbackSummary(rawSummary, rows);
 
       const saved = {
         user_id: user.id,
@@ -609,8 +621,12 @@ function AssistantPage() {
         .single();
       if (upsertError) throw upsertError;
 
-      setPatientSummary(upserted);
-      setSummaryNotice("Eye-health summary updated automatically.");
+      setPatientSummary({ ...upserted, generation_status: summary.generation_status || "generated" });
+      setSummaryNotice(
+        summary.generation_status === "fallback"
+          ? "Gemini summary generation was unavailable. Showing a local safety summary; use refresh to try again."
+          : "Eye-health summary updated from saved chats."
+      );
     } catch (error) {
       setSummaryNotice(error.message || "Could not update summary.");
     } finally {
@@ -620,10 +636,8 @@ function AssistantPage() {
 
   async function openSummaryModal() {
     setSummaryOpen(true);
-    if (user && !patientSummary && !summaryLoading) {
+    if (user && !summaryLoading) {
       await autoGeneratePatientSummary();
-    } else if (user) {
-      await loadPatientSummary();
     }
   }
 
@@ -652,7 +666,8 @@ function AssistantPage() {
     if (cleanText) formData.append("msg", cleanText);
     if (file) formData.append("image", file);
 
-    const sessionId = user ? await ensureChatSession(cleanText || "Image screening chat") : null;
+    const hadImage = Boolean(file);
+    const submittedMode = activeMode;
     const userMessage = {
       role: "user",
       text: cleanText,
@@ -662,7 +677,6 @@ function AssistantPage() {
     };
 
     setMessages(prev => [...prev, userMessage]);
-    const userSaved = await saveChatMessage(sessionId, userMessage);
     setText("");
     resetFile();
     setBusy(true);
@@ -673,13 +687,27 @@ function AssistantPage() {
       const data = await response.text();
       const assistantMessage = { role: "assistant", text: data, time: `${formatTime()} - OcuCare` };
       setMessages(prev => [...prev, assistantMessage]);
-      const assistantSaved = await saveChatMessage(sessionId, assistantMessage);
-      if (userSaved && assistantSaved) await autoGeneratePatientSummary();
+      const outcome = classifyChatOutcome(data, { hadImage, userText: cleanText, mode: submittedMode });
+
+      if (outcome.image_rejected) {
+        setSummaryNotice("Rejected image interactions are not saved or included in the patient summary.");
+        return;
+      }
+
+      const sessionId = user ? await ensureChatSession(cleanText || "Image screening chat") : null;
+      const userSaved = await saveChatMessage(sessionId, userMessage, {
+        ...outcome,
+        role_context: "patient_input",
+        include_in_summary: outcome.include_in_summary || isClinicallyImportantText(cleanText),
+      });
+      const assistantSaved = await saveChatMessage(sessionId, assistantMessage, {
+        ...outcome,
+        role_context: "assistant_result",
+      });
+      if (userSaved && assistantSaved && outcome.include_in_summary) await autoGeneratePatientSummary();
     } catch {
       const errorMessage = { role: "assistant", text: "We could not process your request. Please try again.", time: formatTime(), error: true };
       setMessages(prev => [...prev, errorMessage]);
-      const errorSaved = await saveChatMessage(sessionId, errorMessage);
-      if (userSaved && errorSaved) await autoGeneratePatientSummary();
     } finally {
       setBusy(false);
     }
@@ -803,6 +831,7 @@ function AssistantPage() {
           summary={patientSummary}
           summaryLoading={summaryLoading}
           summaryNotice={summaryNotice}
+          onRefresh={autoGeneratePatientSummary}
           onClose={() => setSummaryOpen(false)}
         />
       )}
@@ -810,7 +839,7 @@ function AssistantPage() {
   );
 }
 
-function SummaryModal({ summary, summaryLoading, summaryNotice, onClose }) {
+function SummaryModal({ summary, summaryLoading, summaryNotice, onRefresh, onClose }) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4 backdrop-blur-sm">
       <div className="max-h-[88vh] w-full max-w-3xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
@@ -820,9 +849,21 @@ function SummaryModal({ summary, summaryLoading, summaryNotice, onClose }) {
             <h2 className="mt-3 text-2xl font-black text-slate-950">Eye Health Summary</h2>
             <p className="mt-2 text-sm text-slate-600">Generated automatically from saved chats and screening-support outputs.</p>
           </div>
-          <button className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50" type="button" onClick={onClose} aria-label="Close summary">
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+              type="button"
+              onClick={onRefresh}
+              disabled={summaryLoading}
+              aria-label="Regenerate summary from saved chats"
+              title="Regenerate summary from saved chats"
+            >
+              <RefreshCw className={summaryLoading ? "animate-spin" : ""} size={18} />
+            </button>
+            <button className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50" type="button" onClick={onClose} aria-label="Close summary">
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         <div className="max-h-[calc(88vh-128px)] overflow-y-auto p-6">
@@ -847,10 +888,10 @@ function SummaryModal({ summary, summaryLoading, summaryNotice, onClose }) {
                 )}
               </div>
               <div className="grid gap-4 md:grid-cols-2">
-                <SummaryList title="Reported Symptoms" items={summary.symptoms} empty="No repeated symptoms identified yet." />
+                <SummaryList title="Reported Symptoms" items={summary.symptoms} empty="No symptoms identified yet." />
                 <SummaryList title="Topics Discussed" items={summary.topics} empty="No topics identified yet." />
                 <SummaryList title="Red Flags" items={summary.red_flags} empty="No urgent warning signs found in saved chats." urgent />
-                <SummaryList title="Image Screening History" items={summary.image_history} empty="No image-screening notes yet." />
+                <SummaryList title="Accepted Screening Findings" items={summary.image_history} empty="No accepted image-screening findings yet." />
               </div>
               <SummaryList title="Recommended Next Steps" items={summary.recommended_next_steps} empty="No next steps generated yet." wide />
               <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-900">
@@ -1307,6 +1348,227 @@ function cleanInlineText(value) {
 function formatTime() {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+function classifyChatOutcome(responseText, { hadImage = false, userText = "", mode = "text-only" } = {}) {
+  const text = String(responseText || "");
+  const lower = text.toLowerCase();
+  const imageRejected = hadImage && isRejectedImageResponse(text);
+  const technicalError = lower.includes("inference error") || lower.includes("model unavailable") || lower.includes("could not process your request");
+  const condition = hadImage && !imageRejected ? extractScreeningCondition(text) : "";
+  const confidence = condition ? extractModelConfidence(text) : null;
+  const urgent = [
+    "urgent symptom", "urgency flag", "seek urgent", "emergency", "sudden vision loss",
+    "severe eye pain", "chemical exposure", "curtain-like", "red flag",
+  ].some(term => lower.includes(term));
+  const uncertain = lower.includes("uncertain / unsupported")
+    || lower.includes("screening status: uncertain")
+    || lower.includes("strongly disagree");
+  const acceptedImage = hadImage && !imageRejected && !technicalError && Boolean(condition || uncertain);
+  const importantText = isClinicallyImportantText(userText);
+
+  return {
+    mode,
+    outcome: imageRejected ? "image_rejected" : technicalError ? "processing_error" : uncertain ? "uncertain" : acceptedImage ? "screening_completed" : "guidance",
+    image_rejected: imageRejected,
+    accepted_image: acceptedImage,
+    condition: condition || null,
+    model_confidence: confidence,
+    urgent,
+    uncertain,
+    include_in_summary: !imageRejected && !technicalError && (acceptedImage || uncertain || urgent || importantText),
+  };
+}
+
+function isRejectedImageResponse(value) {
+  const text = String(value || "").toLowerCase();
+  return text.includes("screening status: image rejected")
+    || text.includes("image rejected before cnn/multimodal analysis")
+    || text.includes("does not appear to be a supported retinal/fundus scan")
+    || text.includes("outside the accepted fundus feature range")
+    || text.includes("was not confirmed as a clear retinal/fundus scan");
+}
+
+function extractScreeningCondition(value) {
+  const text = String(value || "");
+  const patterns = [
+    /AI Screening Impression:\s*\**([^\n*]+)/i,
+    /Predicted Condition:\s*\**([^\n*]+)/i,
+    /(?:\*\*)?Diagnosis:(?:\*\*)?\s*\**([^\n*]+)/i,
+    /Top result:\s*([^\n(]+)/i,
+    /fusion result:\s*([^\n(.;]+)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const normalized = normalizeConditionName(match?.[1]);
+    if (normalized) return normalized;
+  }
+  return "";
+}
+
+function normalizeConditionName(value) {
+  const candidate = String(value || "").replace(/[*_#]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+  if (candidate.includes("diabetic retinopathy")) return "Diabetic Retinopathy";
+  if (candidate.includes("retinal disease")) return "Retinal Disease";
+  if (candidate.includes("glaucoma")) return "Glaucoma";
+  if (candidate.includes("cataract")) return "Cataract";
+  if (/^normal\b/.test(candidate)) return "Normal";
+  return "";
+}
+
+function extractModelConfidence(value) {
+  const match = String(value || "").match(/(?:Model Score|Confidence):\s*\**\s*(\d+(?:\.\d+)?)\s*%/i);
+  return match ? Number(match[1]) : null;
+}
+
+function isClinicallyImportantText(value) {
+  const text = String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+  if (!text || ["hi", "hello", "hey", "good morning", "good evening", "thanks", "thank you"].includes(text)) return false;
+  return [
+    "vision", "eye", "glaucoma", "cataract", "retina", "retinal", "diabetic",
+    "blurry", "blurred", "pressure", "pain", "floaters", "flashes", "redness",
+    "itch", "dry", "watery", "night", "light", "headache", "trauma", "chemical",
+  ].some(term => text.includes(term));
+}
+
+function isSummaryEligibleRow(row) {
+  const metadata = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  if (metadata.image_rejected || metadata.outcome === "image_rejected" || isRejectedImageResponse(row?.content)) return false;
+  if (metadata.include_in_summary === false) return false;
+  if (metadata.include_in_summary === true) return true;
+  if (row?.role === "user") return isClinicallyImportantText(row.content);
+
+  const legacyImageMode = String(metadata.mode || "").toLowerCase().includes("image");
+  const legacyOutcome = classifyChatOutcome(row?.content, { hadImage: legacyImageMode, mode: metadata.mode });
+  return legacyOutcome.accepted_image || legacyOutcome.uncertain || legacyOutcome.urgent;
+}
+
+function rowClinicalMetadata(row) {
+  const metadata = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  if (metadata.condition || metadata.accepted_image || metadata.uncertain || metadata.urgent) return metadata;
+  const legacyImageMode = String(metadata.mode || "").toLowerCase().includes("image");
+  return { ...metadata, ...classifyChatOutcome(row?.content, { hadImage: legacyImageMode, mode: metadata.mode }) };
+}
+
+function toSummaryMessage(row) {
+  const metadata = rowClinicalMetadata(row);
+  let content = String(row?.content || "").replace(/\[image uploaded\]/gi, "").replace(/\s+/g, " ").trim();
+
+  if (row?.role === "assistant") {
+    const score = Number.isFinite(Number(metadata.model_confidence)) ? ` (${Number(metadata.model_confidence).toFixed(1)}% model score)` : "";
+    if (metadata.condition) {
+      content = `Accepted eye-image screening finding: ${metadata.condition}${score}. This is a screening result, not a confirmed diagnosis.`;
+    } else if (metadata.uncertain) {
+      content = "Eye-image screening was uncertain or conflicting and professional review was recommended.";
+    } else if (metadata.urgent) {
+      content = "The conversation contained an urgent eye-health warning and recommended prompt professional care.";
+    } else {
+      content = "";
+    }
+  } else if (!content && metadata.accepted_image) {
+    content = "A retinal/fundus image was accepted for eye screening.";
+  }
+
+  return {
+    role: row.role,
+    content: content.slice(0, 700),
+    image_present: Boolean(row.image_present && metadata.accepted_image),
+    created_at: row.created_at,
+    metadata: {
+      condition: metadata.condition || null,
+      model_confidence: metadata.model_confidence ?? null,
+      accepted_image: Boolean(metadata.accepted_image),
+      urgent: Boolean(metadata.urgent),
+      uncertain: Boolean(metadata.uncertain),
+      include_in_summary: true,
+    },
+  };
+}
+
+function enrichFallbackSummary(summary, rows) {
+  const result = summary && typeof summary === "object" ? summary : {};
+  const isFallback = result.generation_status === "fallback"
+    || String(result.summary_text || "").startsWith("This is an automatic non-diagnostic summary");
+  if (!isFallback) return result;
+
+  const messages = Array.isArray(rows) ? rows : [];
+  const summaryMessages = messages.map(toSummaryMessage).filter(message => message.content);
+  const combined = summaryMessages.map(message => message.content).join(" ").toLowerCase();
+  const concerns = summaryMessages
+    .filter(row => row.role === "user")
+    .map(row => String(row.content || "").replace(/\[image uploaded\]/gi, "").replace(/\s+/g, " ").trim())
+    .filter(value => value && !["hi", "hello", "hey", "good morning", "good evening"].includes(value.toLowerCase()));
+
+  const symptoms = uniqueMatches(combined, [
+    ["eye pressure", "Eye pressure"],
+    ["side vision loss", "Gradual side-vision loss"],
+    ["peripheral vision", "Peripheral-vision changes"],
+    ["blurry vision", "Blurry vision"],
+    ["blurred vision", "Blurred vision"],
+    ["vision loss", "Vision loss"],
+    ["eye pain", "Eye pain"],
+    ["floaters", "Floaters"],
+    ["flashes", "Flashes"],
+    ["red eye", "Red eye"],
+  ]);
+  const topics = uniqueMatches(combined, [
+    ["glaucoma", "Glaucoma"],
+    ["cataract", "Cataract"],
+    ["diabetic retinopathy", "Diabetic retinopathy"],
+    ["retinal disease", "Retinal disease"],
+    ["eye pressure", "Eye pressure"],
+    ["vision loss", "Vision changes"],
+    ["fundus", "Fundus-image screening"],
+    ["screening", "AI screening support"],
+  ]);
+  const redFlags = [];
+  if (["sudden vision loss", "severe eye pain", "chemical exposure", "curtain", "trauma"].some(term => combined.includes(term))) {
+    redFlags.push("An urgent eye-health warning sign was reported in the saved chats");
+  } else if (combined.includes("vision loss")) {
+    redFlags.push("Reported vision loss or visual-field loss needs prompt professional assessment");
+  }
+
+  const screeningFindings = [];
+  messages.forEach(row => {
+    if (row.role !== "assistant") return;
+    const metadata = rowClinicalMetadata(row);
+    if (metadata.condition) {
+      const score = Number.isFinite(Number(metadata.model_confidence)) ? ` (${Number(metadata.model_confidence).toFixed(1)}% model score)` : "";
+      screeningFindings.push(`Accepted image screening suggested ${metadata.condition}${score}; this is not a confirmed diagnosis`);
+      if (metadata.condition !== "Normal") {
+        redFlags.push(`Image screening suggested ${metadata.condition}; arrange professional confirmation`);
+      }
+    } else if (metadata.uncertain) {
+      screeningFindings.push("An image-screening result was uncertain or conflicting and needs professional review");
+    }
+  });
+  const imageHistory = [...new Set(screeningFindings)];
+  const acceptedUploadCount = messages.filter(row => Boolean(row.image_present) && rowClinicalMetadata(row).accepted_image).length;
+  if (acceptedUploadCount && imageHistory.length === 0) {
+    imageHistory.push(`${acceptedUploadCount} retinal/fundus image upload(s) were accepted for screening`);
+  }
+
+  return {
+    ...result,
+    summary_text: concerns.length || imageHistory.length
+      ? `Important saved eye-health information: ${[
+          concerns.length ? `reported concerns: ${concerns.slice(-4).join("; ")}` : "",
+          imageHistory.length ? `screening findings: ${imageHistory.slice(-3).join("; ")}` : "",
+        ].filter(Boolean).join(". ").slice(0, 700)}`
+      : "No clinically important patient-reported concerns or accepted screening findings were found.",
+    symptoms,
+    topics,
+    red_flags: [...new Set(redFlags)],
+    image_history: imageHistory,
+    recommended_next_steps: redFlags.length || imageHistory.some(item => !item.includes("Normal"))
+      ? ["Use this summary only as a preparation aid for professional eye care.", "Arrange prompt or urgent assessment by a licensed eye-care professional based on symptom severity."]
+      : ["Use this summary only as a preparation aid for professional eye care.", "Discuss persistent or worsening eye symptoms with a licensed eye-care professional."],
+    generation_status: "fallback",
+  };
+}
+
+function uniqueMatches(text, patterns) {
+  return [...new Set(patterns.filter(([phrase]) => text.includes(phrase)).map(([, label]) => label))];
 }
 
 function titleFromMessage(value) {

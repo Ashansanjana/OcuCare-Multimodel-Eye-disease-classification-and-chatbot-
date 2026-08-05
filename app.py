@@ -5,6 +5,7 @@ import os
 import sys
 import traceback
 import json
+import re
 
 # Force UTF-8 output so emoji in prompts/responses don't crash on Windows
 os.environ["PYTHONIOENCODING"] = "utf-8"
@@ -683,23 +684,169 @@ def _extract_json_object(raw_text: str) -> dict:
         raise
 
 
+def _chat_response_text(response) -> str:
+    content = getattr(response, "content", response)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("text"):
+                parts.append(str(block["text"]))
+            elif getattr(block, "text", None):
+                parts.append(str(block.text))
+        if parts:
+            return "\n".join(parts)
+    return str(content or "")
+
+
+def _summary_transcript(messages: list, compact: bool = False) -> str:
+    assistant_signals = (
+        "screening", "diagnosis", "impression", "model score", "confidence",
+        "uncertain", "urgent", "ophthalmologist", "image", "vision",
+    )
+    candidates = []
+    for item in messages:
+        role = item.get("role", "unknown")
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+        if compact and role == "assistant" and not any(term in content.lower() for term in assistant_signals):
+            continue
+        per_message_limit = 700 if role == "user" else (700 if compact else 1100)
+        candidates.append(f"{role.upper()}: {content[:per_message_limit]}")
+
+    budget = 6000 if compact else 10000
+    selected = []
+    used = 0
+    for line in reversed(candidates):
+        remaining = budget - used
+        if remaining <= 0:
+            break
+        selected.append(line[:remaining])
+        used += min(len(line), remaining) + 1
+    return "\n".join(reversed(selected))
+
+
+def _build_patient_summary_prompt(transcript: str) -> str:
+    return f"""
+You are generating an automatic Eye Health Summary for a logged-in user of OcuCare.
+
+Rules:
+- This is NOT a medical diagnosis.
+- Summarize only what appears in the transcript.
+- Do not invent patient demographics, diseases, test results, doctors, hospitals, or appointments.
+- Use cautious language: "reported", "discussed", "screening support", "may need".
+- Put each meaningful patient-reported symptom into symptoms, even if it was mentioned only once.
+- Keep the overview short and include only clinically useful patient-reported concerns, accepted screening findings, urgency, and next steps.
+- Do not include greetings, casual messages, technical errors, model architecture, retrieval details, prompts, logs, or repetitive explanations.
+- Never treat a disease mentioned in a general educational question as a disease the user has.
+- Put accepted image-screening findings into image_history, including the suggested condition and model score when supplied.
+- If accepted screening suggests Cataract, Glaucoma, Diabetic Retinopathy, or Retinal Disease, add a cautious red flag saying professional confirmation is needed. Never call it a confirmed diagnosis.
+- Do not include rejected image uploads or their rejection explanations anywhere in the summary.
+- Ignore greetings and casual messages such as "hi" unless clinically relevant.
+- If urgent symptoms are present, include them in red_flags and recommended_next_steps.
+- Return ONLY one valid JSON object. No markdown or commentary.
+
+JSON shape:
+{{
+  "summary_text": "short patient-friendly paragraph",
+  "symptoms": ["reported symptoms or concerns"],
+  "topics": ["eye-health topics or conditions discussed"],
+  "red_flags": ["urgent warning signs mentioned, or empty array"],
+  "image_history": ["image upload/screening notes, or empty array"],
+  "recommended_next_steps": ["safe next steps"],
+  "safety_note": "This is not a diagnosis..."
+}}
+
+Transcript:
+{transcript}
+"""
+
+
 def _fallback_patient_summary(messages: list) -> dict:
-    user_messages = [m.get("content", "") for m in messages if m.get("role") == "user"]
-    recent = " ".join(user_messages[-4:]).strip()
+    user_messages = []
+    for item in messages:
+        if item.get("role") != "user":
+            continue
+        content = re.sub(r"\[(?:accepted )?image uploaded\]", "", str(item.get("content") or ""), flags=re.I)
+        content = re.sub(r"\s+", " ", content).strip()
+        if content and content.lower() not in {"hi", "hello", "hey", "good morning", "good evening"}:
+            user_messages.append(content)
+
+    combined = " ".join(str(item.get("content") or "") for item in messages).lower()
+    symptom_patterns = (
+        ("eye pressure", "Eye pressure"),
+        ("side vision loss", "Gradual side-vision loss"),
+        ("peripheral vision", "Peripheral-vision changes"),
+        ("blurry vision", "Blurry vision"),
+        ("blurred vision", "Blurred vision"),
+        ("vision loss", "Vision loss"),
+        ("eye pain", "Eye pain"),
+        ("floaters", "Floaters"),
+        ("flashes", "Flashes"),
+        ("red eye", "Red eye"),
+        ("night vision", "Night-vision difficulty"),
+    )
+    topic_patterns = (
+        ("glaucoma", "Glaucoma"),
+        ("cataract", "Cataract"),
+        ("diabetic retinopathy", "Diabetic retinopathy"),
+        ("retinal disease", "Retinal disease"),
+        ("eye pressure", "Eye pressure"),
+        ("vision loss", "Vision changes"),
+        ("fundus", "Fundus-image screening"),
+        ("screening", "AI screening support"),
+    )
+
+    symptoms = [label for phrase, label in symptom_patterns if phrase in combined]
+    topics = [label for phrase, label in topic_patterns if phrase in combined]
+    red_flags = []
+    if any(term in combined for term in ("sudden vision loss", "severe eye pain", "chemical exposure", "curtain", "trauma")):
+        red_flags.append("An urgent eye-health warning sign was reported in the saved chats")
+    elif "vision loss" in combined:
+        red_flags.append("Reported vision loss or visual-field loss needs prompt professional assessment")
+
+    screening_conditions = []
+    for condition in ("Glaucoma", "Cataract", "Diabetic Retinopathy", "Retinal Disease", "Normal"):
+        marker = f"accepted eye-image screening finding: {condition.lower()}"
+        if marker in combined:
+            screening_conditions.append(condition)
+            if condition != "Normal":
+                red_flags.append(f"Image screening suggested {condition}; professional confirmation is needed")
+
+    upload_count = combined.count("[image uploaded]") + combined.count("[accepted image uploaded]")
+    image_history = []
+    if upload_count:
+        image_history.append(f"{upload_count} saved message(s) included an uploaded eye image")
+    image_history.extend(
+        f"Accepted image screening suggested {condition}; this is not a confirmed diagnosis"
+        for condition in screening_conditions
+    )
+    if not screening_conditions and any(term in combined for term in ("screening impression", "model score", "image-only model", "vision cnn")):
+        image_history.append("An accepted AI image-screening result was discussed in the saved chats")
+
+    recent = "; ".join(user_messages[-4:]).strip()
+    next_steps = ["Use this summary only as a preparation aid for professional eye care."]
+    if red_flags:
+        next_steps.append("Arrange prompt or urgent assessment by a licensed eye-care professional based on symptom severity.")
+    else:
+        next_steps.append("Discuss persistent or worsening eye symptoms with a licensed eye-care professional.")
+
     return {
         "summary_text": (
-            "This is an automatic non-diagnostic summary of recent eye-health chats. "
+            "This local non-diagnostic summary was created from recent saved eye-health chats. "
             + (f"Recent patient-reported concerns include: {recent[:500]}" if recent else "No patient concerns were found yet.")
         ),
-        "symptoms": [],
-        "topics": [],
-        "red_flags": [],
-        "image_history": [],
-        "recommended_next_steps": [
-            "Use this summary only as a preparation aid for professional eye care.",
-            "Seek urgent care for sudden vision loss, severe pain, trauma, chemical exposure, flashes, floaters, or curtain-like vision changes.",
-        ],
+        "symptoms": symptoms,
+        "topics": topics,
+        "red_flags": red_flags,
+        "image_history": image_history,
+        "recommended_next_steps": next_steps,
         "safety_note": "This is not a diagnosis. It summarizes user-reported information and AI screening-support outputs.",
+        "generation_status": "fallback",
     }
 
 
@@ -746,11 +893,25 @@ def patient_summary():
     for item in messages[-120:]:
         if not isinstance(item, dict):
             continue
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        if metadata.get("image_rejected") or metadata.get("outcome") == "image_rejected" or metadata.get("include_in_summary") is False:
+            continue
         role = item.get("role") if item.get("role") in ("user", "assistant") else "unknown"
         content = str(item.get("content") or "")[:1800]
-        image_note = " [image uploaded]" if item.get("image_present") else ""
+        if "screening status: image rejected" in content.lower() or "image rejected before cnn/multimodal analysis" in content.lower():
+            continue
+        condition = str(metadata.get("condition") or "").strip()
+        if role == "assistant" and condition:
+            score = metadata.get("model_confidence")
+            score_text = f" ({score}% model score)" if score is not None else ""
+            content = f"Accepted eye-image screening finding: {condition}{score_text}. This is screening support, not a confirmed diagnosis."
+        elif role == "assistant" and metadata.get("uncertain"):
+            content = "Eye-image screening was uncertain or conflicting and professional review was recommended."
+        elif role == "assistant" and metadata.get("urgent"):
+            content = "An urgent eye-health warning was identified and prompt professional care was recommended."
+        image_note = " [accepted image uploaded]" if item.get("image_present") and metadata.get("accepted_image") else ""
         if content or image_note:
-            cleaned.append({"role": role, "content": content + image_note})
+            cleaned.append({"role": role, "content": content + image_note, "metadata": metadata})
 
     if not cleaned:
         return jsonify(_fallback_patient_summary([]))
@@ -758,54 +919,44 @@ def patient_summary():
     if not chatModel:
         return jsonify(_fallback_patient_summary(cleaned))
 
-    transcript = "\n".join(
-        f"{item['role'].upper()}: {item['content']}" for item in cleaned
-    )[:14000]
-
-    prompt = f"""
-You are generating an automatic Eye Health Summary for a logged-in user of OcuCare.
-
-Rules:
-- This is NOT a medical diagnosis.
-- Summarize only what appears in the transcript.
-- Do not invent patient demographics, diseases, test results, doctors, hospitals, or appointments.
-- Use cautious language: "reported", "discussed", "screening support", "may need".
-- If urgent symptoms are present, include them in red_flags and recommended_next_steps.
-- Return ONLY valid JSON. No markdown.
-
-JSON shape:
-{{
-  "summary_text": "short patient-friendly paragraph",
-  "symptoms": ["reported symptoms or concerns"],
-  "topics": ["eye-health topics or conditions discussed"],
-  "red_flags": ["urgent warning signs mentioned, or empty array"],
-  "image_history": ["image upload/screening notes, or empty array"],
-  "recommended_next_steps": ["safe next steps"],
-  "safety_note": "This is not a diagnosis..."
-}}
-
-Transcript:
-{transcript}
-"""
-
+    fallback = _fallback_patient_summary(cleaned)
+    generation_error = None
     try:
-        response = chatModel.invoke(prompt)
-        content = getattr(response, "content", response)
-        data = _extract_json_object(str(content))
-        fallback = _fallback_patient_summary(cleaned)
-        return jsonify({
-            "summary_text": str(data.get("summary_text") or fallback["summary_text"]),
-            "symptoms": data.get("symptoms") if isinstance(data.get("symptoms"), list) else [],
-            "topics": data.get("topics") if isinstance(data.get("topics"), list) else [],
-            "red_flags": data.get("red_flags") if isinstance(data.get("red_flags"), list) else [],
-            "image_history": data.get("image_history") if isinstance(data.get("image_history"), list) else [],
-            "recommended_next_steps": data.get("recommended_next_steps") if isinstance(data.get("recommended_next_steps"), list) else fallback["recommended_next_steps"],
-            "safety_note": str(data.get("safety_note") or fallback["safety_note"]),
-        })
-    except Exception as e:
-        print(f"[Summary ERROR] {e}")
-        traceback.print_exc()
-        return jsonify(_fallback_patient_summary(cleaned))
+        transcript = _summary_transcript(cleaned)
+        response = chatModel.invoke(_build_patient_summary_prompt(transcript))
+        data = _extract_json_object(_chat_response_text(response))
+    except Exception as first_error:
+        generation_error = first_error
+        print(f"[Summary] Full transcript attempt failed: {first_error}")
+        try:
+            compact_transcript = _summary_transcript(cleaned, compact=True)
+            response = chatModel.invoke(_build_patient_summary_prompt(compact_transcript))
+            data = _extract_json_object(_chat_response_text(response))
+            generation_error = None
+            print("[Summary] Compact transcript retry succeeded.")
+        except Exception as retry_error:
+            generation_error = retry_error
+
+    if generation_error is None:
+        try:
+            if not isinstance(data, dict):
+                raise ValueError("Summary response was not a JSON object.")
+            print(f"[Summary] Generated structured summary from {len(cleaned)} saved messages.")
+            return jsonify({
+                "summary_text": str(data.get("summary_text") or fallback["summary_text"]),
+                "symptoms": data.get("symptoms") if isinstance(data.get("symptoms"), list) else fallback["symptoms"],
+                "topics": data.get("topics") if isinstance(data.get("topics"), list) else fallback["topics"],
+                "red_flags": data.get("red_flags") if isinstance(data.get("red_flags"), list) else fallback["red_flags"],
+                "image_history": data.get("image_history") if isinstance(data.get("image_history"), list) else fallback["image_history"],
+                "recommended_next_steps": data.get("recommended_next_steps") if isinstance(data.get("recommended_next_steps"), list) else fallback["recommended_next_steps"],
+                "safety_note": str(data.get("safety_note") or fallback["safety_note"]),
+                "generation_status": "generated",
+            })
+        except Exception as validation_error:
+            generation_error = validation_error
+
+    print(f"[Summary ERROR] Both Gemini attempts failed: {generation_error}")
+    return jsonify(fallback)
 
 
 @app.route("/get", methods=["GET", "POST"])
