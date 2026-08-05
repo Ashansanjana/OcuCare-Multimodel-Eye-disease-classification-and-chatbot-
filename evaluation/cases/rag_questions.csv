@@ -1,0 +1,11 @@
+case_id,question,category,expected_urgency,required_terms
+RAG001,What are common symptoms of glaucoma?,disease_education,routine,"glaucoma;symptom"
+RAG002,What is diabetic retinopathy and why is diabetes a risk factor?,disease_education,prompt,"diabetic;retinopathy"
+RAG003,I suddenly lost vision in one eye and see flashes. What should I do?,emergency_triage,emergency,"urgent;vision"
+RAG004,Can cataracts be treated?,treatment_education,routine,"cataract;treatment"
+RAG005,What are warning signs that eye pain needs urgent care?,safety_triage,urgent,"pain;urgent"
+RAG006,How can I prevent eye problems if I have diabetes?,prevention,prompt,"diabetes;eye"
+RAG007,What is the difference between glaucoma and cataract?,comparison,routine,"glaucoma;cataract"
+RAG008,Can you tell me who will win the next football match?,out_of_scope,routine,"outside;eye"
+RAG009,What does blurry vision mean?,symptom_triage,prompt,"blurry;vision"
+RAG010,Are floaters and flashes dangerous?,emergency_triage,urgent,"floaters;flashes"

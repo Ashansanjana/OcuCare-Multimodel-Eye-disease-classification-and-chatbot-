@@ -3,305 +3,333 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OcuAI Terminal</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+  <title>OcuCare Assistant</title>
+  <meta name="description" content="OcuCare assistant for source-grounded eye-health questions and image-supported screening research." />
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
-  <style>
-    body { overflow-y: hidden; }
-    #hero { padding: 100px 8% 20px; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-    .chat-wrapper { width: 100%; max-width: 900px; height: 80vh; display: flex; flex-direction: column; }
-    .chat-panel { height: 100%; display: flex; flex-direction: column; }
-    .chat-body { flex: 1; height: auto; }
-    
-    /* File upload styles */
-    .file-input-wrapper {
-      position: relative;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 46px; height: 46px;
-      border-radius: 50%;
-      background: rgba(0,245,255,0.1);
-      border: 1px solid rgba(0,245,255,0.3);
-      color: var(--plasma);
-      cursor: pointer;
-      transition: all 0.3s;
-      flex-shrink: 0;
-    }
-    .file-input-wrapper:hover {
-      background: rgba(0,245,255,0.2);
-    }
-    .file-input-wrapper input[type=file] {
-      position: absolute;
-      width: 100%; height: 100%;
-      opacity: 0; cursor: pointer;
-    }
-    
-    #imagePreviewContainer {
-      display: none;
-      padding: 10px 20px;
-      border-top: 1px solid rgba(0,245,255,0.1);
-      background: rgba(0,31,92,0.3);
-    }
-    #imagePreview {
-      max-height: 80px;
-      border-radius: 8px;
-      border: 1px solid var(--plasma);
-    }
-    .msg-image {
-      max-width: 200px;
-      border-radius: 8px;
-      margin-bottom: 8px;
-      display: block;
-    }
-  </style>
 </head>
-<body>
+<body class="assistant-page">
+  <header class="site-header app-header">
+    <a class="brand" href="/" aria-label="OcuCare home">
+      <span class="brand-mark">OC</span>
+      <span>
+        <strong>OcuCare</strong>
+        <small>Clinical support prototype</small>
+      </span>
+    </a>
+    <nav class="site-nav" aria-label="Assistant navigation">
+      <a href="/">Home</a>
+      <a href="/#resources">Resources</a>
+      <a href="/#contact">Contact</a>
+    </nav>
+    <a class="btn btn-secondary" href="/">Back to Home</a>
+  </header>
 
-<!-- ═══════════════════════════════════ STAR FIELD CANVAS ═══ -->
-<canvas id="starfield"></canvas>
-
-<!-- ═══════════════════════════════════ FLOATING NAV ═══ -->
-<nav id="floatnav">
-  <div class="nav-inner">
-    <div class="nav-logo">
-      <div class="nav-eye-icon">
-        <div class="nav-iris"></div>
-        <div class="nav-pupil"></div>
+  <main class="app-shell">
+    <aside class="support-panel" aria-label="Assistant guidance">
+      <div class="panel-block">
+        <span class="status-pill">Informational support available</span>
+        <h1>OcuCare Assistant</h1>
+        <p>
+          Ask about eye symptoms, conditions, or care. You may upload an eye image for
+          screening support. This tool cannot confirm a diagnosis.
+        </p>
       </div>
-      <a href="/" style="text-decoration:none;"><span class="nav-brand">OCUCARE</span></a>
-    </div>
-    <div class="nav-links">
-      <a href="/#hero" class="nav-link">Home</a>
-      <a href="/#diseases" class="nav-link">Diseases</a>
-    </div>
-    <a href="/" class="nav-cta" style="text-decoration:none;">Exit Terminal</a>
-  </div>
-</nav>
 
-<section id="hero">
-  <div class="chat-wrapper">
-    <div class="chat-panel">
-      
-      <div class="chat-header">
-        <div class="chat-avatar">
-          <div class="avatar-eye">
-            <div class="avatar-iris"></div>
-            <div class="avatar-pupil"></div>
+      <div class="panel-block">
+        <h2>Supported workflows</h2>
+        <ul class="check-list">
+          <li>Text-only eye-health guidance with retrieved context</li>
+          <li>Image-only screening for supported disease classes</li>
+          <li>Image and symptom consistency checks</li>
+          <li>Urgent symptom escalation when red flags are reported</li>
+        </ul>
+      </div>
+
+      <div class="notice-card urgent-note">
+        <strong>Emergency warning</strong>
+        <p>Seek immediate care for sudden vision loss, severe pain, injury, chemical exposure, flashes, floaters, or a curtain over vision.</p>
+      </div>
+    </aside>
+
+    <section class="chat-wrapper" aria-label="OcuCare chat">
+      <div class="chat-panel">
+        <div class="chat-header">
+          <div>
+            <span class="eyebrow">Eye-health support</span>
+            <h2>Patient guidance chat</h2>
           </div>
-          <div class="status-ring"></div>
+          <span class="header-badge">Research prototype</span>
         </div>
-        <div class="chat-info">
-          <div class="chat-name">OcuAI Terminal</div>
-          <div class="chat-status">
-            <span class="status-dot"></span>
-            <span>Orbital Station Online</span>
+
+        <div class="chat-body" id="chatMessages" aria-live="polite">
+          <div class="msg-row bot-row">
+            <div class="msg-avatar bot-avatar">OC</div>
+            <div class="msg-bubble bot-bubble">
+              <div class="msg-text">
+                Ask a question about eye symptoms, conditions, or care. You may upload an eye image for screening support. This tool is informational and cannot confirm a diagnosis.
+              </div>
+              <div class="msg-time">OcuCare Assistant</div>
+            </div>
           </div>
         </div>
-        <div class="chat-controls">
-          <div class="ctrl-dot red"></div>
-          <div class="ctrl-dot gold"></div>
-          <div class="ctrl-dot green"></div>
+
+        <div id="imagePreviewContainer" class="image-preview" aria-live="polite">
+          <img id="imagePreview" alt="Selected eye image preview" />
+          <span id="imagePreviewName">Image selected</span>
+          <button type="button" id="clearImage" class="icon-text-btn">Remove</button>
+        </div>
+
+        <div class="chat-footer">
+          <p class="input-disclaimer">Do not use this for emergencies. Seek immediate care for sudden vision loss, severe pain, trauma, flashes, floaters, or a curtain over vision.</p>
+          <form id="chatForm">
+            <label class="file-input-wrapper" title="Upload eye image" aria-label="Upload eye image">
+              <span aria-hidden="true">+</span>
+              <input type="file" id="imageInput" name="image" accept="image/*" />
+            </label>
+            <input type="text" id="textInput" name="msg" placeholder="Describe your symptom or ask an eye-health question..." autocomplete="off" />
+            <button type="submit" class="btn btn-primary send-btn">Send</button>
+          </form>
         </div>
       </div>
-      
-      <div class="chat-body" id="chatMessages">
-        <div class="chat-welcome">
-          <div class="welcome-icon">📡</div>
-          <p>OcuAI orbital intelligence online.</p>
-          <p style="margin-top:10px; font-size: 0.8rem;">You can upload an eye scan (image) or ask a question.</p>
-        </div>
-      </div>
-      
-      <div id="imagePreviewContainer">
-        <img id="imagePreview" src="" alt="Preview">
-      </div>
+    </section>
+  </main>
 
-      <div class="chat-footer">
-        <form id="chatForm">
-          <div class="file-input-wrapper" title="Upload Scan">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
-            </svg>
-            <input type="file" id="imageInput" name="image" accept="image/*" />
-          </div>
-          
-          <input type="text" id="textInput" name="msg" placeholder="Transmit your query or caption..." autocomplete="off" />
-          
-          <button type="submit" id="sendBtn">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="22" y1="2" x2="11" y2="13"></line>
-              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-            </svg>
-          </button>
-        </form>
-      </div>
-      
-    </div>
-  </div>
-</section>
-
-<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
-<script>
-// ── STARFIELD CANVAS (Same as chat.html) ───────────────────────────────────────
-const canvas = document.getElementById('starfield');
-const ctx = canvas.getContext('2d');
-let W, H, particles = [], mouse = { x: 0, y: 0 };
-function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
-function createParticles() {
-  particles = [];
-  const configs = [
-    { count: 20, sizeMin: 2, sizeMax: 3, speedMin: 0.4, speedMax: 0.8, layer: 1 },
-    { count: 30, sizeMin: 1, sizeMax: 2, speedMin: 0.2, speedMax: 0.4, layer: 2 },
-    { count: 30, sizeMin: 0.5, sizeMax: 1, speedMin: 0.05,speedMax: 0.15, layer: 3 },
-  ];
-  configs.forEach(cfg => {
-    for (let i = 0; i < cfg.count; i++) {
-      const rand = Math.random();
-      const color = rand < 0.6 ? 'rgba(0,245,255,' : rand < 0.9 ? 'rgba(255,255,255,' : 'rgba(255,215,0,';
-      particles.push({
-        x: Math.random() * W, y: Math.random() * H,
-        vx: (Math.random() - 0.5) * cfg.speedMax + (Math.random() > 0.5 ? cfg.speedMin : -cfg.speedMin),
-        vy: (Math.random() - 0.5) * cfg.speedMax + (Math.random() > 0.5 ? cfg.speedMin : -cfg.speedMin),
-        size: cfg.sizeMin + Math.random() * (cfg.sizeMax - cfg.sizeMin), color: color,
-        alpha: 0.4 + Math.random() * 0.6, layer: cfg.layer,
-      });
+  <script>
+    function formatTime() {
+      const d = new Date();
+      return d.getHours().toString().padStart(2, "0") + ":" + d.getMinutes().toString().padStart(2, "0");
     }
-  });
-}
-function animateStars() {
-  ctx.clearRect(0, 0, W, H);
-  particles.forEach(p => {
-    const parallaxX = (mouse.x / W - 0.5) * (4 - p.layer) * -2;
-    const parallaxY = (mouse.y / H - 0.5) * (4 - p.layer) * -2;
-    p.x += p.vx; p.y += p.vy;
-    if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
-    if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
-    ctx.beginPath(); ctx.arc(p.x + parallaxX, p.y + parallaxY, p.size, 0, Math.PI * 2);
-    ctx.fillStyle = p.color + p.alpha + ')'; ctx.fill();
-  });
-  requestAnimationFrame(animateStars);
-}
-window.addEventListener('resize', () => { resize(); createParticles(); });
-document.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
-resize(); createParticles(); animateStars();
 
-function formatTime() {
-  const d = new Date();
-  return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
-}
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
 
-$(document).ready(function () {
-  let selectedFile = null;
+    function classifySection(title, body) {
+      const text = `${title}\n${body}`.toLowerCase();
+      if (text.includes("urgent") || text.includes("emergency") || text.includes("red-flag")) return "urgent";
+      if (text.includes("uncertain") || text.includes("unsupported") || text.includes("conflict") || text.includes("disagree")) return "warning";
+      if (text.includes("knowledge base evidence") || text.includes("retrieved passages") || text.includes("source:")) return "evidence";
+      if (text.includes("recommended action") || text.includes("clinical recommendation") || text.includes("ophthalmologist") || text.includes("triage")) return "recommendation";
+      if (text.includes("screening status") || text.includes("screening impression") || text.includes("model score")) return "screening";
+      return "default";
+    }
 
-  // Handle Image Preview
-  $("#imageInput").on("change", function(e) {
-    const file = e.target.files[0];
-    if (file) {
-      selectedFile = file;
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        $("#imagePreview").attr("src", e.target.result);
-        $("#imagePreviewContainer").show();
+    function sectionTitleFor(line) {
+      const clean = line.trim().replace(/^\d+\.\s*/, "");
+      const known = [
+        "OcuAI Screening Support Result",
+        "OcuAI Screening Support Report",
+        "Text-only triage mode",
+        "Screening Status:",
+        "Reason:",
+        "Reported Symptoms:",
+        "Image-only model evidence:",
+        "Image + symptom fusion evidence:",
+        "Recommended action:",
+        "Knowledge Base Evidence",
+        "Retrieved passages used for source-grounded answering:",
+        "AI Screening Impression:",
+        "Model Score:",
+        "Analysis Method:",
+        "What This Condition Means",
+        "Why The Model May Have Predicted This",
+        "Common Symptoms",
+        "Causes And Risk Factors",
+        "Treatment And Management",
+        "Knowledge Base Context",
+        "Clinical Recommendation",
+        "Triage guidance",
+      ];
+      return known.find(label => clean.startsWith(label)) || null;
+    }
+
+    function displayTitle(title) {
+      const clean = String(title || "").replace(/:$/, "");
+      const lower = clean.toLowerCase();
+      if (lower.includes("screening status") || lower.includes("screening impression")) return "Screening impression";
+      if (lower.includes("reason") || lower.includes("what this condition means") || lower.includes("why the model")) return "Possible explanation";
+      if (lower.includes("urgent") || lower.includes("red-flag")) return "Red flags";
+      if (lower.includes("recommended") || lower.includes("triage") || lower.includes("clinical recommendation")) return "Recommended next step";
+      if (lower.includes("knowledge base") || lower.includes("retrieved passages") || lower.includes("context")) return "Evidence/context";
+      return clean;
+    }
+
+    function appendResponseSection(container, title, lines) {
+      const body = lines.join("\n").trim();
+      if (!title && !body) return;
+      const section = document.createElement("section");
+      section.className = `response-section ${classifySection(title || "", body)}`;
+
+      if (title) {
+        const heading = document.createElement("div");
+        heading.className = "response-section-title";
+        heading.textContent = displayTitle(title);
+        section.appendChild(heading);
       }
-      reader.readAsDataURL(file);
-    } else {
-      selectedFile = null;
-      $("#imagePreviewContainer").hide();
-      $("#imagePreview").attr("src", "");
+
+      if (body) {
+        const content = document.createElement("div");
+        content.className = "response-section-body";
+        content.textContent = body;
+        section.appendChild(content);
+      }
+      container.appendChild(section);
     }
-  });
 
-  function scrollChat() {
-    $("#chatMessages")[0].scrollTop = $("#chatMessages")[0].scrollHeight;
-  }
+    function renderBotResponse(target, data) {
+      target.textContent = "";
+      target.classList.add("structured-response");
 
-  // Handle Form Submit
-  $("#chatForm").on("submit", function (event) {
-    event.preventDefault();
-    
-    const rawText = $("#textInput").val().trim();
-    if (!rawText && !selectedFile) return; // Prevent empty submission
+      const normalized = String(data || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+      const lines = normalized.split("\n");
+      let currentTitle = "";
+      let currentLines = [];
 
-    const time = formatTime();
-    
-    // Clear inputs immediately
-    $("#textInput").val("");
-    $("#imageInput").val("");
-    $("#imagePreviewContainer").hide();
-    
-    let userHtml = `<div class="msg-row user-row"><div class="msg-bubble user-bubble">`;
-    if (selectedFile) {
-      const src = $("#imagePreview").attr("src");
-      userHtml += `<img src="${src}" class="msg-image" />`;
+      lines.forEach(line => {
+        const trimmed = line.trim();
+        if (trimmed === "---") {
+          appendResponseSection(target, currentTitle, currentLines);
+          currentTitle = "";
+          currentLines = [];
+          return;
+        }
+
+        const detectedTitle = sectionTitleFor(trimmed);
+        if (detectedTitle) {
+          appendResponseSection(target, currentTitle, currentLines);
+          currentTitle = trimmed;
+          currentLines = [];
+        } else {
+          currentLines.push(line);
+        }
+      });
+
+      appendResponseSection(target, currentTitle, currentLines);
     }
-    if (rawText) {
-      userHtml += `<div class="msg-text">${rawText}</div>`;
-    }
-    userHtml += `<div class="msg-time">${time}</div></div><div class="msg-avatar user-avatar">YOU</div></div>`;
-    
-    $("#chatMessages").append(userHtml);
-    scrollChat();
 
-    // Show typing indicator
-    const typingHtml = `
-      <div class="msg-row bot-row" id="typing-indicator">
-        <div class="msg-avatar bot-avatar">AI</div>
-        <div class="msg-bubble bot-bubble typing">
-          <span></span><span></span><span></span>
-        </div>
-      </div>`;
-    $("#chatMessages").append(typingHtml);
-    scrollChat();
+    document.addEventListener("DOMContentLoaded", () => {
+      const form = document.getElementById("chatForm");
+      const textInput = document.getElementById("textInput");
+      const imageInput = document.getElementById("imageInput");
+      const imagePreview = document.getElementById("imagePreview");
+      const imagePreviewName = document.getElementById("imagePreviewName");
+      const imagePreviewContainer = document.getElementById("imagePreviewContainer");
+      const clearImage = document.getElementById("clearImage");
+      const chatMessages = document.getElementById("chatMessages");
+      let selectedFile = null;
+      let selectedPreviewSrc = "";
 
-    // Prepare FormData
-    const formData = new FormData();
-    if (rawText) formData.append("msg", rawText);
-    if (selectedFile) formData.append("image", selectedFile);
+      function scrollChat() {
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      }
 
-    // Reset selectedFile reference
-    selectedFile = null;
+      function resetImage() {
+        selectedFile = null;
+        selectedPreviewSrc = "";
+        imageInput.value = "";
+        imagePreview.removeAttribute("src");
+        imagePreviewName.textContent = "Image selected";
+        imagePreviewContainer.style.display = "none";
+      }
 
-    $.ajax({
-      type: "POST",
-      url: "/get",
-      data: formData,
-      processData: false,
-      contentType: false,
-    }).done(function (data) {
-      $("#typing-indicator").remove();
-      const msgId = "bot_" + Date.now();
-      
-      // Parse markdown to HTML (basic implementation, or just use text if returned as text)
-      // Since backend returns plain text/markdown, we will insert it directly.
-      const botHtml = `
-        <div class="msg-row bot-row">
-          <div class="msg-avatar bot-avatar">AI</div>
-          <div class="msg-bubble bot-bubble">
-            <div class="msg-text" id="${msgId}" style="white-space: pre-line;"></div>
-            <div class="msg-time">${time} · OcuAI</div>
-          </div>
-        </div>`;
-      $("#chatMessages").append(botHtml);
-      const target = document.getElementById(msgId);
-      if (target) target.innerHTML = data; // use innerHTML if backend formats nicely, otherwise textContent
-      scrollChat();
-    }).fail(function() {
-      $("#typing-indicator").remove();
-      const errHtml = `
-        <div class="msg-row bot-row">
-          <div class="msg-avatar bot-avatar">AI</div>
-          <div class="msg-bubble bot-bubble error">
-            <div class="msg-text">⚠️ Signal lost. Unable to reach orbital station. Please retry your transmission.</div>
-          </div>
-        </div>`;
-      $("#chatMessages").append(errHtml);
-      scrollChat();
+      imageInput.addEventListener("change", event => {
+        const file = event.target.files[0];
+        if (!file) {
+          resetImage();
+          return;
+        }
+
+        selectedFile = file;
+        imagePreviewName.textContent = file.name;
+        const reader = new FileReader();
+        reader.onload = event => {
+          selectedPreviewSrc = event.target.result;
+          imagePreview.src = selectedPreviewSrc;
+          imagePreviewContainer.style.display = "flex";
+        };
+        reader.readAsDataURL(file);
+      });
+
+      clearImage.addEventListener("click", resetImage);
+
+      form.addEventListener("submit", async event => {
+        event.preventDefault();
+        const rawText = textInput.value.trim();
+        if (!rawText && !selectedFile) return;
+
+        const time = formatTime();
+        const fileToSend = selectedFile;
+        const previewToShow = selectedPreviewSrc;
+
+        textInput.value = "";
+        resetImage();
+
+        const userRow = document.createElement("div");
+        userRow.className = "msg-row user-row";
+        const userBubble = document.createElement("div");
+        userBubble.className = "msg-bubble user-bubble";
+        if (previewToShow) {
+          const img = document.createElement("img");
+          img.src = previewToShow;
+          img.className = "msg-image";
+          img.alt = "Uploaded eye image";
+          userBubble.appendChild(img);
+        }
+        if (rawText) {
+          const text = document.createElement("div");
+          text.className = "msg-text";
+          text.innerHTML = escapeHtml(rawText);
+          userBubble.appendChild(text);
+        }
+        const userTime = document.createElement("div");
+        userTime.className = "msg-time";
+        userTime.textContent = time;
+        userBubble.appendChild(userTime);
+        userRow.appendChild(userBubble);
+        const userAvatar = document.createElement("div");
+        userAvatar.className = "msg-avatar user-avatar";
+        userAvatar.textContent = "You";
+        userRow.appendChild(userAvatar);
+        chatMessages.appendChild(userRow);
+
+        const typing = document.createElement("div");
+        typing.className = "msg-row bot-row";
+        typing.id = "typing-indicator";
+        typing.innerHTML = '<div class="msg-avatar bot-avatar">OC</div><div class="msg-bubble bot-bubble typing"><span></span><span></span><span></span></div>';
+        chatMessages.appendChild(typing);
+        scrollChat();
+
+        const formData = new FormData();
+        if (rawText) formData.append("msg", rawText);
+        if (fileToSend) formData.append("image", fileToSend);
+
+        try {
+          const response = await fetch("/get", { method: "POST", body: formData });
+          if (!response.ok) throw new Error("Request failed");
+          const data = await response.text();
+          typing.remove();
+
+          const botRow = document.createElement("div");
+          botRow.className = "msg-row bot-row";
+          botRow.innerHTML = '<div class="msg-avatar bot-avatar">OC</div><div class="msg-bubble bot-bubble"><div class="msg-text"></div><div class="msg-time"></div></div>';
+          botRow.querySelector(".msg-time").textContent = `${formatTime()} - OcuCare`;
+          renderBotResponse(botRow.querySelector(".msg-text"), data);
+          chatMessages.appendChild(botRow);
+        } catch (error) {
+          typing.remove();
+          const errRow = document.createElement("div");
+          errRow.className = "msg-row bot-row";
+          errRow.innerHTML = '<div class="msg-avatar bot-avatar">OC</div><div class="msg-bubble bot-bubble error"><div class="msg-text">We could not process your request. Please try again.</div></div>';
+          chatMessages.appendChild(errRow);
+        }
+        scrollChat();
+      });
     });
-  });
-});
-</script>
+  </script>
 </body>
 </html>

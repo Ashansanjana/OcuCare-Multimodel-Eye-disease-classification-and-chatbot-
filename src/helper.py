@@ -26,10 +26,11 @@ def filter_to_minimal_docs(docs: List[Document]) -> List[Document]:
     minimal_docs: List[Document] = []
     for doc in docs:
         src = doc.metadata.get("source")
+        page = doc.metadata.get("page")
         minimal_docs.append(
             Document(
                 page_content=doc.page_content,
-                metadata={"source": src}
+                metadata={"source": src, "page": page}
             )
         )
     return minimal_docs

@@ -1,0 +1,6 @@
+case_id,image_path,truthful_symptoms,conflicting_symptoms,expected_behavior
+MM001,data/uploads/0_4015166.jpg,I have gradual blurry vision and trouble seeing clearly.,I have no vision problem but severe knee pain.,uncertain_or_conflict
+MM002,data/uploads/1_4540560.jpg,I notice cloudy vision and glare around lights.,I have sudden flashes floaters and a dark curtain over vision.,uncertain_or_conflict
+MM003,data/uploads/2_5194189.jpg,I have eye pressure and peripheral vision difficulty.,I have only itchy skin and no eye symptoms.,uncertain_or_conflict
+MM004,data/uploads/100_left.jpeg,I have diabetes and blurred vision.,I have perfect vision and only stomach pain.,uncertain_or_conflict
+MM005,data/uploads/8_right.jpg,I have no major symptoms and this is a routine eye check.,I have severe eye pain after chemical exposure.,uncertain_or_conflict

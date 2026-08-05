@@ -34,6 +34,9 @@ CNN_models/
 
 # Logs and Scratch scripts
 *.log
+evaluation/results/
+frontend/node_modules/
+frontend/dist/
 error_log.txt
 filtered_log.txt
 small_log.txt
@@ -43,3 +46,7 @@ extract_log.py
 filter_log.py
 read_log.py
 store_index.py
+
+calude.py
+
+frontend/.env
