@@ -961,9 +961,11 @@ function ChatMessage({ message }) {
 }
 
 function StructuredResponse({ text }) {
-  const sections = dedupeSections(
-    parseResponse(text).filter(section => !["evidence", "hidden"].includes(section.kind))
-  );
+  const parsedSections = dedupeSections(parseResponse(text));
+  const visibleSections = parsedSections.filter(section => !["evidence", "hidden"].includes(section.kind));
+  const sections = visibleSections.length > 0
+    ? visibleSections
+    : [{ title: "", body: String(text || "").trim(), kind: "default" }];
   return (
     <div className="space-y-4">
       {sections.map((section, index) => (
@@ -1181,12 +1183,12 @@ function parseResponse(value) {
   }
 
   lines.forEach(line => {
-    const clean = line.trim().replace(/^\d+\.\s*/, "");
+    const clean = cleanHeadingCandidate(line);
     if (clean === "---") {
       push();
       return;
     }
-    const detected = knownTitles.find(item => clean.startsWith(item));
+    const detected = knownTitles.find(item => clean.toLowerCase().startsWith(item.toLowerCase()));
     if (detected) {
       push();
       title = detected;
@@ -1198,6 +1200,17 @@ function parseResponse(value) {
   });
   push();
   return sections.length ? sections : [{ title: "", body: String(value || ""), kind: "default" }];
+}
+
+function cleanHeadingCandidate(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^>\s*/, "")
+    .replace(/^#{1,6}\s*/, "")
+    .replace(/\*\*/g, "")
+    .replace(/__/g, "")
+    .replace(/^\d+\.\s*/, "")
+    .trim();
 }
 
 function normalizeSection(title, body) {
@@ -1244,7 +1257,6 @@ function classify(title, body) {
   if (text.includes("urgent") || text.includes("emergency") || text.includes("red-flag")) return "urgent";
   if (titleText.includes("image-text consistency note")) return "warning";
   if (text.includes("uncertain") || text.includes("unsupported") || text.includes("conflict") || text.includes("disagree")) return "warning";
-  if (text.includes("knowledge base evidence") || text.includes("retrieved passages") || text.includes("trusted web evidence") || text.includes("source:")) return "evidence";
   if (text.includes("recommended action") || text.includes("clinical recommendation") || text.includes("ophthalmologist") || text.includes("triage")) return "recommendation";
   if (text.includes("screening status")) return "screening";
   return "default";

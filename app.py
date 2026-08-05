@@ -77,6 +77,8 @@ except Exception as e:
     def predict_fusion(img_path, txt):
         return {"diagnosis": "Fusion model unavailable", "confidence": 0.0}
 
+# filter_1
+
 try:
     from src.image_filter import assess_image_eligibility, image_filter_rejection_message
     print("[OK] Image eligibility filter loaded.")
@@ -92,6 +94,8 @@ except Exception as e:
             score = 1.0
             details = {}
         return _Result()
+
+#filter_2
 
     def image_filter_rejection_message(result):
         return "The uploaded image could not be validated for retinal/fundus screening."
@@ -111,6 +115,8 @@ except Exception as e:
             score = 1.0
             details = {}
         return _Result()
+
+# filter_3
 
     def fundus_feature_rejection_message(result):
         return "The uploaded image is outside the accepted retinal/fundus image feature profile."
@@ -195,7 +201,7 @@ if GOOGLE_API_KEY:
     try:
         from langchain_google_genai import ChatGoogleGenerativeAI
         chatModel = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
+            model="gemini-3.5-flash",
             temperature=0.2,
             max_output_tokens=2048
         )
